@@ -47,4 +47,4 @@ This was built for British Columbia specifically (DriveBC, BC Ferries, BC Transi
 
 ## License
 
-No license file yet — treat as all-rights-reserved until one is added, or open an issue/PR if you'd like to use this and want a license added.
+[MIT](LICENSE) — use it, fork it, adapt it for your own region.

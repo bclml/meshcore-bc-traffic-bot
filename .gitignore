@@ -1,0 +1,16 @@
+# Runtime output — never share your own operational history
+emergency_agent.log
+emergency_agent.log.*
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Local scratch / unrelated files, not part of this project
+New folder/
+pics/
+bc_traffic_agent.zip
+
+# Editor/OS cruft
+.DS_Store
+Thumbs.db

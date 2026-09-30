@@ -1,0 +1,186 @@
+# BC Emergency Transportation Agent Installation Guide
+**Hardware Platform:** Heltec V3 LoRa Node  
+**Host System:** Windows 11  
+**Default Output Interface:** 5 category channels — #drivebc, #bcferries, #bctransit, #translink, #weather — plus #bot-van for testing
+**Distribution Type:** Fully Portable (Zero-Configuration, Auto-Detect)
+
+---
+
+## 1. System Overview
+The BC Emergency Transportation Agent is a lightweight, zero-configuration automation utility designed for MeshCore and Meshtastic operators across British Columbia. 
+
+The agent runs locally on a Windows 11 PC, scanning official public transit and highway/ferry status networks every 1 minute and weather sources every 10 minutes, without requiring expensive private developer API subscriptions [DriveBC Open511 API Guidelines - Gov.bc.ca]. When an incident is discovered matching localized criteria, the agent dynamically compiles the report, appends the user-defined regional scope identifier, and commands the Heltec V3 hardware — over USB or Bluetooth, your choice — to broadcast it over the local mesh network [BC Highway Events].
+
+### Key Operational Features
+*   **Comprehensive Data Scrape:** Monitors live data from DriveBC Events, BC Ferries Service Notices, TransLink (SkyTrain, Bus, SeaBus, West Coast Express), and BC Transit (Victoria, Nanaimo, Comox Valley, Cowichan Valley, Salt Spring Island, Campbell River, Port Alberni, Powell River, Sunshine Coast) every 1 minute, and weather forecasts/warnings every 10 minutes [BC Highway Events].
+*   **Category-Specific Channels:** Instead of one shared channel, each source broadcasts to its own dedicated MeshCore channel — DriveBC incidents to `#drivebc`, BC Ferries notices to `#bcferries`, BC Transit alerts to `#bctransit`, TransLink alerts to `#translink`, and both Environment Canada warnings and the daily forecast broadcasts to `#weather` — so listeners can subscribe to only the categories they care about. See Section 4 for one-time channel setup.
+*   **Weekly Public-Channel Reminder:** Every Sunday around noon, the agent sends two messages on the public channel (0) — a "Don't forget to check the traffic this week." reminder, followed by a list of the 5 category channels currently in use — so newcomers listening on Public know where to tune in.
+*   **Auto-Reply to Test Messages:** Any incoming channel message whose text is just "test" (or the shorthand "t") gets an automatic reply on that same channel: `@<sender> Test should be made in #bot-van` (see NODE_LOCATION_NAME/the reply text in emergency_agent.py if you want to customize the wording), letting people confirm their signal is reaching the node. `#bot-van` is a dedicated channel for trying this out.
+*   **Tsunami & Earthquake Alerts:** Polls NWS's tsunami Warning/Watch feed and USGS's earthquake feed every minute, filtered to BC-relevant events only. Unlike every other alert type, these broadcast to **every channel** — Public first, then all 5 category channels — since they're urgent enough to reach everyone regardless of which channel they're subscribed to.
+*   **TransLink Alerts Filtered to Major Disruptions:** TransLink's feed covers every SkyTrain/bus/SeaBus/WCE route in Metro Vancouver, so only alerts flagged as service-disrupting (suspensions, no service, major/significant delays, detours, emergencies) are broadcast — minor/cosmetic notices (an elevator out, a small schedule tweak) are filtered out. BC Transit's regional feeds are left unfiltered since they're already scoped to smaller service areas.
+*   **Dynamic Regional Scoping:** Prompts the user on launch to enable or disable regional scopes. When enabled, it allows custom shortcodes (e.g., `LML`, `VI`, `SC`) to be independently assigned to the Lower Mainland, Vancouver Island, and the Sunshine Coast [BC Highway Events].
+*   **Incident Lifecycle Tracking:** Tracks events in real-time. It broadcasts an emergency alert immediately when a new problem is found, and automatically follows up with a `✅ CLEARED` message the moment the incident drops off public feeds [BC Highway Events].
+*   **Smart Anti-Spam Sync:** On startup, the script automatically parses its historical log file to rebuild active incident memory. This ensures that restarting the agent will never trigger duplicate or repetitive broadcasts over the radio.
+*   **Choice of Connection:** On launch, the agent asks whether to connect to the Heltec node over **USB** (auto-detects the serial port) or **Bluetooth** (auto-scans and connects over BLE) — no manual port/address entry needed either way.
+
+---
+
+## 2. Windows 11 Host Environment Setup
+
+### Step 2.1: Python Installation
+1. Download the standard stable installer from the official website: `python.org/downloads`.
+2. Launch the downloaded installer executable.
+3. **Critical Step:** Before clicking install, you must check the box at the bottom of the window labeled **"Add python.exe to PATH"**. If this is skipped, Windows will not recognize terminal commands.
+4. Click **Install Now**, wait for the process to finish, and close the window.
+
+### Step 2.2: Install Required Libraries
+Open your Windows Terminal (Command Prompt) and run the following command to download the network connection, hardware mapping, and transit-alert extensions:
+```cmd
+pip install requests meshcore-cli pyserial gtfs-realtime-bindings
+```
+*(meshcore-cli pulls in Bluetooth (BLE) support automatically as a dependency; `pyserial` is needed for the USB connection option; `gtfs-realtime-bindings` decodes TransLink's and BC Transit's official real-time alert feeds — both agencies' alert websites are JavaScript-only and can't be scraped directly, so the agent talks to their real machine-readable feeds instead.)*
+
+### Step 2.2b: Get a Free TransLink API Key (optional, for SkyTrain/Bus/SeaBus/WCE alerts)
+TransLink's alerts require a free developer API key — BC Transit's do not.
+1. Go to https://developer.translink.ca/Account/Register and create a free account.
+2. Generate an API key from your account dashboard.
+3. Use it one of two ways:
+   - **Simplest:** just paste it in when the agent prompts for it at launch (Step 5.2b below). It's only kept in memory for that run, never saved to a file.
+   - **Skip the prompt every time:** save it once as a Windows environment variable so the agent finds it automatically:
+     1. Open Command Prompt and run: `setx TRANSLINK_API_KEY "your-key-here"`
+     2. Close and reopen the terminal (or restart `Run_Agent.bat`) for the change to take effect.
+     3. From then on, the agent will silently pick up the key from this variable and skip asking for it. The key lives only in your own Windows user environment — it's never written into `emergency_agent.py` itself.
+
+### Step 2.3: Pair the Heltec V3 Node over Bluetooth (only if you plan to use Bluetooth)
+If you intend to connect over USB, skip this step — just plug in the node with a data cable when you're ready to run the agent. If you intend to connect over Bluetooth:
+1. Power on the Heltec V3 node.
+2. Open **Settings > Bluetooth & devices > Add device** on your Windows 11 PC.
+3. Select **Bluetooth**, wait for the node to appear (it will advertise as something like `MeshCore-xxxxx`), and pair it.
+4. Once paired, the node stays available for meshcli to connect to going forward — you don't need to repeat this step unless you unpair it or switch computers.
+
+---
+
+## 3. Toolkit Workspace Installation
+
+To keep the application fully portable and easy to manage, follow this specific structural setup:
+
+1. Create a folder anywhere on your computer (e.g., on your Desktop) and name it `trafic`.
+2. Inside the `trafic` folder, create a new text file and save it exactly as `emergency_agent.py`. Copy and paste the complete script into this file.
+3. Create a second text file inside the same folder and save it as `Run_Agent.bat`. Paste the following execution script inside it:
+   ```cmd
+   @echo off
+   cd /d "%~dp0"
+   python emergency_agent.py
+   pause
+   ```
+
+*Note: By using the `%~dp0` macro variable, the batch script dynamically targets its own location, allowing the toolkit folder to be moved or shared without breaking.*
+
+---
+
+## 4. Initial Hardware Node Configuration
+
+Before activating the automated scraping loop, all 5 category channels — `#drivebc`, `#bcferries`, `#bctransit`, `#translink`, `#weather` — plus one general-purpose testing channel, `#bot-van`, must be created on the Heltec V3's memory stack. This ensures the radio hardware knows which encryption key to use when formatting each channel's outbound RF packets.
+
+`#bot-van` isn't tied to any alert source — it's just a channel people can send "test" or "t" to and get an automatic `@name Test should be made in #bot-van` reply back, to confirm their signal is reaching the node. (The auto-reply actually works on any channel the agent can see messages on, not just this one — `#bot-van` just gives people an obvious, dedicated place to try it without cluttering the category channels.)
+
+Each channel needs a 32-character hex key (16 bytes). Generate 6 of them once with:
+```cmd
+python -c "import secrets; [print(secrets.token_hex(16)) for _ in range(6)]"
+```
+Save these keys somewhere safe — **every radio in your mesh that should be able to decode a given channel needs that same channel's key entered identically.** The agent itself never needs to know these keys; it only sends the channel *number*, and the node's own firmware handles encryption using whatever key was configured for that channel index.
+
+Pick whichever connection method you plan to use day-to-day for this one-time setup, and replace `<key1>` through `<key6>` below with 6 different keys from the command above (use a different key per channel so listeners can subscribe to categories independently):
+
+**If using USB:**
+1. Connect your Heltec V3 node to the computer using a verified **USB Data Cable** (do not use charge-only cables).
+2. Open your Windows terminal window and run:
+   ```cmd
+   meshcli -s COM4 add_channel drivebc <key1>
+   meshcli -s COM4 add_channel bcferries <key2>
+   meshcli -s COM4 add_channel bctransit <key3>
+   meshcli -s COM4 add_channel translink <key4>
+   meshcli -s COM4 add_channel weather <key5>
+   meshcli -s COM4 add_channel bot-van <key6>
+   meshcli -s COM4 get_channels
+   ```
+   *(Replace `COM4` with your actual port if different — check Device Manager if unsure. The agent script auto-detects the port on its own later, so this manual flag is only needed for this one-time setup.)*
+
+**If using Bluetooth:**
+1. Make sure the Heltec V3 node is powered on, within range, and already paired (see Step 2.3 above).
+2. Open your Windows terminal window and run:
+   ```cmd
+   meshcli -d "" add_channel drivebc <key1>
+   meshcli -d "" add_channel bcferries <key2>
+   meshcli -d "" add_channel bctransit <key3>
+   meshcli -d "" add_channel translink <key4>
+   meshcli -d "" add_channel weather <key5>
+   meshcli -d "" add_channel bot-van <key6>
+   meshcli -d "" get_channels
+   ```
+   *(`-d ""` tells meshcli to connect to the first MeshCore device it finds over Bluetooth. The agent script auto-scans and connects on its own later, so this manual flag is only needed for this one-time setup.)*
+
+Either way, `get_channels` should list all 6 names cleanly, each with its own channel number — for example:
+```
+1: drivebc [a1b2c3...]
+2: bcferries [d4e5f6...]
+3: bctransit [...]
+4: translink [...]
+5: weather [...]
+6: bot-van [...]
+```
+**The agent doesn't care which number each channel landed on** — every time it starts up, it asks the node for this exact list and matches each source to the right channel by name automatically. It retries this lookup a few times if the node doesn't answer right away, and keeps retrying once a minute in the background for as long as it stays unresolved, so a slow-to-wake node at boot (or a mid-run reboot) recovers on its own. If a channel is missing (not yet created, or misspelled), that category's alerts are **withheld** (not sent — never to the public channel) and a warning is logged, until the channel exists and the agent picks it up on its next retry — check `emergency_agent.log` after first launch to confirm all 5 category channels resolved correctly ("Resolved node channels: {...}"). Public (0) is reserved for the tsunami all-channel alert and the weekly reminder only; category alerts never land there. `#bot-van` doesn't need to resolve to anything since nothing broadcasts to it on a schedule — it just needs to exist so the auto-reply has somewhere obvious to be tested.
+
+If you're upgrading from an older version of this agent that only used a single `#transportation` channel, that channel can stay in place (harmless if unused) or be removed with `meshcli <conn> remove_channel transportation`.
+
+---
+
+## 5. Execution and Operation
+
+### Step 5.1: Launching the Agent
+To start the automation, simply double-click the **`Run_Agent.bat`** file inside your workspace folder. A terminal screen will launch and instantly display the application startup banner.
+
+### Step 5.2: Choosing a Connection Method
+The console will first ask:
+`Connect to the Heltec V3 via USB or Bluetooth? (usb/bluetooth):`
+
+Type `usb` or `bluetooth` (or just `u`/`b`) and press Enter.
+
+*   **USB:** The script scans system ports for the Heltec node's onboard hardware signature and prints:
+    `✅ Auto-Detected Heltec V3 Port: COM4`
+    If nothing is found, make sure the node is connected with a data cable (not charge-only) and drivers are installed.
+*   **Bluetooth:** The script scans for the node over BLE and prints:
+    `✅ Auto-Detected Heltec V3 BLE Device: <bluetooth-address> (<device name>)`
+    If nothing is found, double-check that the node is powered on, within range, and paired in Windows Bluetooth settings (Step 2.3).
+
+### Step 5.2b: TransLink API Key
+If `gtfs-realtime-bindings` is installed, the agent next checks for a `TRANSLINK_API_KEY` environment variable (Step 2.2b). If it's set, you'll see a log line confirming it's being used and the prompt is skipped entirely. Otherwise, the console will ask:
+`Enter your TransLink API key (free at https://developer.translink.ca/Account/Register) or press ENTER to skip TransLink (SkyTrain/Bus/SeaBus/WCE) alerts:`
+
+Paste your key and press Enter to enable TransLink alerts for this run, or just press Enter to skip them (you'll be asked again next launch, unless you set the environment variable).
+
+### Step 5.3: Configuring Outbound Regional Scopes
+Directly following hardware detection, the console workflow will handle scope tags:
+1.  **Prompt:** `Should region scopes be used to transmit alerts? (yes/no):`
+2.  **Enabling Scopes:** Enter `yes` to trigger the standalone sub-prompts. Supply your preferred shortcode identifiers (such as `LML`, `VI`, or `SC`) independently for each territory when prompted [BC Highway Events].
+3.  **Radio Broadcast Format:** Discovered incidents will parse your keyword dictionaries, tag matches automatically, and apply the code prefix strings (e.g., `[LML] 🚨 NEW [DriveBC]: ...`) straight over the air [BC Highway Events].
+
+### Step 5.4: Navigating the Frequency Prompt
+Following scope setup, the terminal will present an interactive frequency prompt:
+`Enter target frequency in MHz (e.g., 910.425) or press ENTER to skip:`
+
+*   **Tuning to a Custom Frequency:** Type your targeted regional mesh frequency using a standard 900MHz float layout (such as `910.425` or `910.525`) and hit **Enter**. The script will use whichever connection you chose (USB or Bluetooth) to flash your Heltec V3 radio registers, command the node to reboot, wait 5 seconds for the hardware to stabilize, and start the monitoring loops.
+*   **Bypassing Frequency Configuration:** Press **Enter** directly on a completely blank prompt line. The script will safely skip configuration changes and immediately deploy the automated feed scanners using whatever frequency profile is already active on the device hardware.
+
+---
+
+## 6. Maintenance and Troubleshooting
+The agent prints running summary reports to the screen every 60 seconds. A historical log of all discovered incidents, scraped data feeds, and hardware transmissions is saved automatically to a text file inside your local workspace directory:
+`.\emergency_agent.log`
+
+If transmissions fail or the prompt returns an error:
+*   **USB:** ensure no other serial configuration utilities, regional map visualizers, or terminal instances are open in the background, as Windows allows only one application to hold an active connection to a COM port at a time.
+*   **Bluetooth:** check that the node is powered on and within range, that it's still paired in Windows Bluetooth settings (unpaired/forgotten devices won't be found), and that no other tool (another meshcli session, a phone app, etc.) is already holding an active BLE connection to the node, since most MeshCore nodes only accept one BLE connection at a time.
+*   Either way, note that most MeshCore node firmware only supports one transport at a time (USB-serial *or* BLE, not both) — if you switch connection methods here, make sure the node itself was flashed with firmware that supports the one you picked.
+
+**Verifying the "test" auto-reply after first launch:** this relies on parsing meshcore-cli's `.sync_msgs` JSON output. After restarting the agent, send a message that's just the word "test" on any of the 5 channels (or `#bot-van`) from another device and confirm you get the `@yourname Test should be made in #bot-van` reply within ~20 seconds. If nothing comes back, check `emergency_agent.log` for a "Failed to poll for incoming messages" or "Failed to send test-reply" line — that'll usually point at what to fix (e.g. an older meshcore-cli version without `sync_msgs`, or a different JSON field layout than expected).

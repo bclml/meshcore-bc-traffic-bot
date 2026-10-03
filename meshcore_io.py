@@ -13,6 +13,8 @@ DEFAULT_CLI_PATH = os.path.join(os.path.dirname(sys.executable), "Scripts", "mes
 
 BLE_SCAN_TIMEOUT = 10  # seconds to wait while scanning for the node over Bluetooth
 
+TRACE = None  # set by gui_diag: TRACE(args, attempt, outcome, seconds, detail) after every meshcli attempt (no output text)
+
 CONNECTION_ARGS = None  # meshcli connection prefix, e.g. ["-s", "COM4"] or ["-a", "AA:BB:CC:DD:EE:FF"]
 
 # --- OPTIONAL GUI HOOKS (see mcIRC.py; harmless when running headless) ---
@@ -219,23 +221,36 @@ def auto_detect_ble_device():
     logging.critical("❌ No MeshCore Bluetooth device detected. Make sure the node is powered on, within range, and paired with this computer first (Windows Settings > Bluetooth & devices > Add device).")
     return None
 
+def _trace(args, attempt, outcome, started, detail=""):
+    if TRACE is None: return
+    try: TRACE(args, attempt + 1, outcome, time.time() - started, detail)
+    except Exception: pass
+
 def execute_mesh_command(args_list, timeout=30, retries=2, retry_delay=2):
     binary = DEFAULT_CLI_PATH if os.path.exists(DEFAULT_CLI_PATH) else "meshcli"
     last_err = None
     for attempt in range(retries + 1):
+        started = time.time()
         try:
             with MESH_LOCK:
                 result = subprocess.run([binary] + args_list, capture_output=True, text=True, **UTF8, timeout=timeout, creationflags=NO_WINDOW)
         except subprocess.TimeoutExpired:
             last_err = RuntimeError(f"meshcli timed out after {timeout}s (BLE connection may have stalled or the node is out of range)")
+            _trace(args_list, attempt, "TIMEOUT", started, f"after {timeout}s")
             if attempt < retries: time.sleep(retry_delay)
             continue
+        except OSError as e:
+            _trace(args_list, attempt, "CANNOT-START", started, str(e)[:200])
+            raise
         if result.returncode != 0:
             last_err = RuntimeError(result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}")
+            _trace(args_list, attempt, f"EXIT {result.returncode}", started, str(last_err)[:300].replace("\n", " | "))
         elif _TRANSIENT_MESHCLI_ERROR_RE.search(f"{result.stdout}\n{result.stderr}"):
             hit = _TRANSIENT_MESHCLI_ERROR_RE.search(f"{result.stdout}\n{result.stderr}").group(0)
             last_err = RuntimeError(f"meshcli reported '{hit}' (serial/BLE connection failed this attempt)")
+            _trace(args_list, attempt, "FAILED", started, hit)
         else:
+            _trace(args_list, attempt, "ok", started, f"{len(result.stdout)} chars")
             return result
         if attempt < retries: time.sleep(retry_delay)
     raise last_err

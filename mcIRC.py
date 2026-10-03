@@ -4,7 +4,7 @@
 The core does chat (channel windows, nick list, input line), the node list/map with long-term node memory, and
 settings.  Everything else - including broadcasting traffic/weather/earthquake alerts - is an addon in addons/
 (Tools > Addons).  Run:  python mcIRC.py     (add --demo to try it with fake data and no radio)"""
-import argparse, datetime, logging, os, queue, re, sys, tempfile, threading, time
+import argparse, datetime, logging, os, queue, re, sys, tempfile, threading, time, traceback
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk, messagebox
@@ -21,6 +21,8 @@ import gui_nodes
 from gui_logs import WindowLog, LOG_DIR, logged_windows
 import gui_update
 import gui_style
+import gui_diag
+from gui_report import BugReportDialog
 from gui_switchbar import SwitchBar
 from gui_update_ui import UpdateDialog, CatalogDialog, LINKS, open_link
 import gui_themes
@@ -133,16 +135,24 @@ class CoreWorker:
         q = self.app.q
         q.put(("state", "connecting", ""))
         try:
+            gui_diag.event("connect", f"connecting: mode={s['mode']} port={s['port']} baud={s['baud'] or 'default'} (last good port: {s.get('last_port') or 'none'})")
+            if s["mode"] == "usb": gui_diag.ports_snapshot()
             args = ea.build_connection_args(s["mode"], s["port"], s["ble_target"], s["tcp_host"], s["tcp_port"], s["baud"],
                                             prefer_port=s.get("last_port", ""), should_stop=self.stop_evt.is_set)
-            if not args or self.stop_evt.is_set(): return
+            if not args or self.stop_evt.is_set():
+                gui_diag.event("connect", "no usable connection found" if not args else "cancelled")
+                return
+            gui_diag.event("connect", "using " + gui_diag.describe_args(args))
             ea.CONNECTION_ARGS = args
             ea.resolve_channel_indices()
             if self.stop_evt.is_set(): return
             q.put(("channels",))
             q.put(("state", "connected", " ".join(args)))
+            gui_diag.event("connect", f"connected; {len(ea.CHANNEL_INDEX_BY_NAME)} channel(s) resolved")
             try:
-                q.put(("nodeinfo", gui_nodecfg.read_node()))
+                node = gui_nodecfg.read_node()
+                gui_diag.node_summary(node)
+                q.put(("nodeinfo", node))
                 if args[0] == "-s": q.put(("lastport", args[1]))   # it answered: next time use this port without probing
             except Exception as e:
                 why = ea.explain_failure(str(e))
@@ -159,8 +169,12 @@ class CoreWorker:
                     last_sync = now
                     self.app.node_sync_worker()
                 self.stop_evt.wait(self.app.settings["poll_seconds"])
-        except Exception as e: logging.error(f"Connection ended: {e}")
-        finally: q.put(("state", "stopped", ""))
+        except Exception as e:
+            logging.error(f"Connection ended: {e}")
+            gui_diag.event("crash", "connection thread:\n" + traceback.format_exc())
+        finally:
+            gui_diag.event("connect", "stopped")
+            q.put(("state", "stopped", ""))
 
 
 class QueueLogHandler(logging.Handler):
@@ -247,8 +261,10 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         h.add_command(label="Check for updates...", command=lambda: UpdateDialog(self))
         h.add_command(label="Browse addons...", command=lambda: CatalogDialog(self))
         h.add_separator()
+        h.add_command(label="Report a bug...", command=lambda: BugReportDialog(self))
+        h.add_command(label="Open troubleshooting logs folder", command=self.open_diag_folder)
         for label in LINKS:
-            if label != "Project page on GitHub...": h.add_command(label=label, command=lambda l=label: open_link(l))
+            if label not in ("Project page on GitHub...", "Report a bug..."): h.add_command(label=label, command=lambda l=label: open_link(l))
         h.add_separator()
         h.add_command(label="Project page on GitHub...", command=lambda: open_link("Project page on GitHub..."))
         h.add_command(label=f"About (version {gui_update.local_version()})", command=lambda: show_about(self.root))
@@ -386,7 +402,12 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
     def stamp(self):
         return [(datetime.datetime.now().strftime("[%H:%M] "), "ts")] if self.settings["show_time"] else []
 
-    def status_line(self, text, tag="text"):
+    def open_diag_folder(self):
+        os.makedirs(gui_diag.directory(), exist_ok=True)
+        os.startfile(gui_diag.directory())
+
+    def status_line(self, text, tag="text", log=True):
+        if log and tag in ("error", "warn"): gui_diag.event(tag, text)       # (records that came through logging are already in the diagnostic log)
         self.status.write(self.stamp() + [(text, tag)])
         self.mark_unread(self.status, "event")
 
@@ -416,6 +437,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         self.root.after(100, self.drain)
 
     def _h_chat(self, kind, idx, text, nick, extra):
+        gui_diag.count(f"messages_{kind}")          # only counted: the text itself is never logged
         if kind == "dm": return self._dm_in(text, extra.get("pubkey") or nick, extra)
         name = display_for_index(idx)
         closed = self.settings.get("closed_channels", [])
@@ -433,12 +455,13 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
                                              "snr": extra.get("snr"), "hops": hops, "raw": extra.get("raw")})
 
     def _h_log(self, level, msg):
-        self.status_line("*** " + msg, "error" if level >= logging.ERROR else "warn" if level >= logging.WARNING else "info")
+        self.status_line("*** " + msg, "error" if level >= logging.ERROR else "warn" if level >= logging.WARNING else "info", log=False)
 
     def _h_state(self, state, detail):
         was = self.connected
         self.connected = state == "connected"
         self.sb_state.config(text={"connecting": "Connecting...", "connected": f"Connected ({detail})", "stopped": "Not connected"}[state])
+        gui_diag.event("state", f"{state} {'(' + gui_diag.describe_args(detail.split()) + ')' if detail else ''}")
         if self.connected and not was:
             self.addons.dispatch("on_connect")
             self.resolve_key_windows(ask_radio=True)
@@ -645,6 +668,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
             if self.is_remote_window() and arg: return self.send_remote(self.current, arg)
             return self.status_line("*** /rpt <text> sends raw text to the repeater of the current private window.", "warn")
         if self.try_remote_command(cmd, arg): return          # in a repeater / room-server window, CLI commands go to that node
+        if cmd in ("bug", "report"): return BugReportDialog(self)
         simple = {"list": lambda: ChannelListDialog(self), "map": self.open_map, "nodes": self.open_node_list, "addons": self.open_addons,
                   "options": self.open_options, "connect": self.connect, "disconnect": self.disconnect, "quit": self.quit}
         if cmd == "help":
@@ -717,7 +741,9 @@ def main():
         if lock is None and gui_single.notify_existing():
             print("mcIRC is already running - brought it to the front.")
             return
+    gui_diag.start(gui_update.local_version(), demo=args.demo)
     root = tk.Tk()
+    root.report_callback_exception = gui_diag.tk_exception
     holder["app"] = App(root, demo=args.demo)
     root.mainloop()
 

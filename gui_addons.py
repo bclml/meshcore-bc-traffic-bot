@@ -139,6 +139,10 @@ class AddonManager:
         except Exception:
             self.errors[name] = traceback.format_exc()
             self.loaded.pop(name, None)
+            try:
+                import gui_diag
+                gui_diag.event("addon", f"'{name}' failed to load:\n{self.errors[name]}")
+            except Exception: pass
             self.app.status_line(f"*** Addon '{name}' failed to load: {self.errors[name].strip().splitlines()[-1]}", "error")
             return False
 

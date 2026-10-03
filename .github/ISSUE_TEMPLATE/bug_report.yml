@@ -20,14 +20,19 @@ body:
   - type: textarea
     id: log
     attributes:
-      label: Relevant log lines
-      description: From the Status window or logs/Status.txt. Remove anything private (API keys, node keys) first.
+      label: Troubleshooting log
+      description: Help > Report a bug... fills this in for you (it never contains message text). Otherwise paste the newest file from the diagnostics folder (Help > Open troubleshooting logs folder).
       render: text
+  - type: input
+    id: device
+    attributes:
+      label: Device / board
+      description: For example "Heltec V3", "LilyGo T-Beam", "RAK4631" - the report fills in the firmware if it could read it.
   - type: dropdown
     id: connection
     attributes:
       label: How is your node connected?
-      options: [USB, Bluetooth, Demo mode (no radio), Not applicable]
+      options: [USB, Bluetooth, WiFi / TCP, Demo mode (no radio), Not applicable]
   - type: input
     id: addons
     attributes:

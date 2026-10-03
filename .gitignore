@@ -25,3 +25,4 @@ addons/*
 !addons/_example_addon.py
 update_state.json
 backup/
+diagnostics/

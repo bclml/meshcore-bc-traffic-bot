@@ -15,7 +15,7 @@ from gui_addons import BASE_DIR, BRANCH, RAW, REPO, _http_get, vkey
 STATE_PATH = os.path.join(BASE_DIR, "update_state.json")
 ZIP_URL = f"https://github.com/{REPO}/archive/refs/heads/{BRANCH}.zip"
 
-EXACT = {"mcIRC.py", "meshcore_io.py", "emergency_agent.py", "Run_Agent.bat", "Run_GUI.bat", "Run_GUI.sh", "Run_GUI.command", "requirements.txt", "pyproject.toml", "How to run.txt", "README.md", "LICENSE",
+EXACT = {"mcIRC.py", "meshcore_io.py", "emergency_agent.py", "Run_Agent.bat", "Run_GUI.bat", "Run_GUI.sh", "Run_GUI.command", "requirements.txt", "pyproject.toml", "uv.lock", "How to run.txt", "README.md", "LICENSE",
          "VERSION", "CONTRIBUTING.md", "addons-catalog.json", "addons/_example_addon.py"}
 GLOBS = ["gui_*.py", "packages/*", "docs/*"]   # gui_*.py only at the top level; packages/ and docs/ at any depth
 EDITABLE = {"emergency_agent.py"}

@@ -111,7 +111,8 @@ class BugReportDialog(tk.Toplevel):
         mode = "Demo mode (no radio)" if self.app.demo else MODES.get(s.get("mode"), "Not applicable")
         return {"title": "[Bug] " + (self.what.get("1.0", "end").strip().splitlines() or [""])[0][:70],
                 "version": gui_update.local_version(), "what": self.what.get("1.0", "end").strip(),
-                "device": gui_diag.device(), "connection": mode, "addons": installed_addons(self.app)}
+                "device": f"{gui_diag.device() or 'unknown board'} - connected by {mode}", "connection": mode,   # GitHub doesn't always pre-select dropdowns, so the device line says it too
+                 "addons": installed_addons(self.app)}
 
     def full_report(self):
         f = self.fields()

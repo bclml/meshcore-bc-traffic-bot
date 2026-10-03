@@ -207,7 +207,11 @@ WEATHER_EMOJIS = {0: "☀️", 1: "☀️", 2: "⛅", 3: "☁️", 45: "🌫️"
 
 # --- LOGGING SETUP ---
 _log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-_file_handler = RotatingFileHandler(LOG_FILE_PATH, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8')
+# The log is also the bot's memory: after a restart it is replayed to learn which alerts are already announced (reload_active_alerts_from_log), so
+# nothing but the real bot may write to it.  Tests, demo mode and tools set MCIRC_NO_LOG_FILE=1 (an invented "NEW" line would later be answered
+# with a real "CLEARED" broadcast).
+if os.environ.get("MCIRC_NO_LOG_FILE"): _file_handler = logging.NullHandler()
+else: _file_handler = RotatingFileHandler(LOG_FILE_PATH, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8')
 _file_handler.setFormatter(_log_formatter)
 
 

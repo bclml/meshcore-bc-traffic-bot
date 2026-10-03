@@ -810,6 +810,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--demo", action="store_true", help="fill the UI with fake data; never touches the radio")
     args = ap.parse_args()
+    if args.demo: os.environ["MCIRC_NO_LOG_FILE"] = "1"      # demo mode must never write to the bot's real log
     holder, lock = {}, None
     if not args.demo:   # one copy at a time: two would fight over the radio port
         import gui_single

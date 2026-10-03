@@ -2,7 +2,7 @@
 # mcIRC is an application, not a library, so it is not built or installed as a package.
 [project]
 name = "mcirc"
-version = "1.4.4"          # keep equal to the VERSION file
+version = "1.4.5"          # keep equal to the VERSION file
 description = "mIRC-style desktop chat client for MeshCore LoRa mesh nodes"
 readme = "README.md"
 license = { text = "MIT" }

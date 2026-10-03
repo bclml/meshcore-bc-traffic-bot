@@ -3,6 +3,8 @@
 Checks the manifest, where files would be written, syntax, that the addon class loads, and that on_load /
 on_unload (and build_options, if a display is available) run against a stand-in API.  Exit code 0 = all passed."""
 import importlib.util, json, os, sys
+
+os.environ["MCIRC_NO_LOG_FILE"] = "1"      # validating an addon must never write to the real operational log
 from unittest import mock
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

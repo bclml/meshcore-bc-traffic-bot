@@ -15,8 +15,25 @@ SOUNDS = {"None": None,
           "Double beep": ("beep", [(900, 80), (1300, 80)]), "Rising chirp": ("beep", [(700, 60), (900, 60), (1200, 90)])}
 EVENTS = {"private": ("Private message arrives", "Ding"), "mention": ("Someone @mentions your node name", "Exclamation"),
           "highlight": ("A highlight word is said", "Question"), "channel": ("Any message in a channel you're not looking at", "None")}
+# used when the Windows sound scheme is "No Sounds" (the system sounds are then silent)
+FALLBACK = {"SystemAsterisk": [(1000, 90), (1400, 110)], "SystemExclamation": [(800, 120), (800, 120)], "SystemHand": [(400, 250)],
+            "SystemQuestion": [(1100, 70), (900, 90)], "SystemDefault": [(900, 100)]}
 COOLDOWN = 1.5
 _last = [0.0]
+
+
+def _alias_has_sound(alias):
+    """False when the user's Windows sound scheme has nothing assigned to this system sound."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"AppEvents\Schemes\Apps\.Default\{alias}\.Current") as k:
+            return bool(winreg.QueryValueEx(k, "")[0])
+    except Exception:
+        return True      # can't tell: let Windows try
+
+
+def _beeps(pattern):
+    threading.Thread(target=lambda: [winsound.Beep(f, ms) for f, ms in pattern], daemon=True).start()   # Beep() blocks, so keep it off the GUI thread
 
 
 def play(choice, custom_path="", bell=None):
@@ -29,10 +46,11 @@ def play(choice, custom_path="", bell=None):
             if bell: bell()
             return
         kind, val = spec
-        if kind == "alias": winsound.PlaySound(val, winsound.SND_ALIAS | winsound.SND_ASYNC)
+        if kind == "alias":
+            if _alias_has_sound(val): winsound.PlaySound(val, winsound.SND_ALIAS | winsound.SND_ASYNC)
+            else: _beeps(FALLBACK.get(val, [(900, 100)]))
         elif kind == "wav" and os.path.isfile(val): winsound.PlaySound(val, winsound.SND_FILENAME | winsound.SND_ASYNC)
-        elif kind == "beep":
-            threading.Thread(target=lambda: [winsound.Beep(f, ms) for f, ms in val], daemon=True).start()   # Beep() blocks, so keep it off the GUI thread
+        elif kind == "beep": _beeps(val)
     except Exception:
         pass
 

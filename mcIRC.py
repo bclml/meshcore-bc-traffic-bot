@@ -70,7 +70,7 @@ def split_mentions(text, base_tag, my_name, words=()):
 
 
 class ChatWindow:
-    def __init__(self, parent, name, topic, font, log=None, history=0, theme=None):
+    def __init__(self, parent, name, topic, font, log=None, history=0, theme=None, my_name=""):
         self.name, self.topic, self.nicks, self.unread, self.key, self.log = name, topic, set(), "", None, log
         self.frame = tk.Frame(parent, bg=TEXT_BG)
         self.text = tk.Text(self.frame, wrap="word", state="disabled", bg=TEXT_BG, fg="black", font=font,
@@ -85,7 +85,13 @@ class ChatWindow:
             old = log.tail(history)   # earlier sessions, shown in grey
             if old:
                 t.config(state="normal")
-                for line in old: t.insert("end", safe_text(line) + "\n", "hist")
+                for line in old:
+                    line = safe_text(line)
+                    start, cut = t.index("end-1c"), (line.find("> ") + 2 if "> " in line else 0)
+                    t.insert("end", line + "\n", "hist")
+                    for m in MENTION.finditer(line, cut):      # old lines get the same @mention highlighting as new ones
+                        mine = bool(my_name) and _plain(m.group(1) or m.group(2) or "") == _plain(my_name)
+                        t.tag_add("mention_me" if mine else "mention", f"{start}+{m.start()}c", f"{start}+{m.end()}c")
                 t.config(state="disabled")
                 t.see("end")
             log.stamp("Session Start")
@@ -320,7 +326,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
     def add_window(self, name, topic, in_tree=True):
         if name in self.windows: return self.windows[name]
         log = WindowLog(name, self.log_dir) if self.settings["log_enabled"] else None
-        w = ChatWindow(self.stack, name, topic, self.font, log, self.settings["log_history"], self.theme)
+        w = ChatWindow(self.stack, name, topic, self.font, log, self.settings["log_history"], self.theme, self.settings["node_name"])
         w.frame.grid(row=0, column=0, sticky="nsew")
         self.windows[name] = w
         if in_tree and hasattr(self, "tree") and not name.startswith("@") and self.tree.exists("Channels"):   # the tree holds Status + channels only; people/repeaters/rooms live on the top bar

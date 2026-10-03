@@ -241,8 +241,15 @@ class CommandsMixin:
         pw = (self.admin_pw or {}).get((w.key or w.name)[:12])
         args = (["login", key, pw] if pw else []) + (["cmd", key, text, "wmt8"] if text else [])
         w.write(self.stamp() + [(f"* {announce or 'sent to ' + w.name[1:] + ': ' + text}", "info")])
+        ctype = str((row or {}).get("type") or 2)
+        cname = (row or {}).get("name") or w.name[1:]
         def work():
-            with io.MESH_LOCK: return _clean(io.execute_mesh_command(io.CONNECTION_ARGS + args, timeout=45, retries=1))
+            with io.MESH_LOCK:
+                out = _clean(io.execute_mesh_command(io.CONNECTION_ARGS + args, timeout=45, retries=1))
+                if any(l.startswith(("Unknown contact", "Unknown destination")) for l in out):
+                    # the radio has forgotten this node (its contact slots are full / it was pruned): re-add it from mcIRC's memory, flood-routed
+                    out = _clean(io.execute_mesh_command(io.CONNECTION_ARGS + ["add_contact", key, ctype, cname, "reset_path", key] + args, timeout=60, retries=1))
+                return out
         def done(r):
             if isinstance(r, Exception): return w.write(self.stamp() + [(f"* failed: {io.explain_failure(str(r))}", "error")])
             if not r: return w.write(self.stamp() + [("* no reply within 8 seconds (out of range, wrong/no admin password - use /login - or this command has no reply)", "warn")])

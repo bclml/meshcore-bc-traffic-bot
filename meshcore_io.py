@@ -8,6 +8,7 @@ import serial.tools.list_ports
 
 # When the GUI runs under pythonw (no console of its own), every meshcli.exe call would otherwise flash a console window.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+UTF8 = dict(encoding="utf-8", errors="replace", env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})   # meshcli must be able to print emoji/accents in replies (Windows console default can't)
 DEFAULT_CLI_PATH = os.path.join(os.path.dirname(sys.executable), "Scripts", "meshcli.exe")
 
 BLE_SCAN_TIMEOUT = 10  # seconds to wait while scanning for the node over Bluetooth
@@ -164,7 +165,7 @@ def scan_ble(timeout=6):
     """Bluetooth devices meshcli can see: list of raw lines (format is whatever meshcli prints, usually 'address  name')."""
     try:
         res = subprocess.run([DEFAULT_CLI_PATH if os.path.exists(DEFAULT_CLI_PATH) else "meshcli", "-l", "-T", str(timeout)],
-                             capture_output=True, text=True, timeout=timeout + 20, creationflags=NO_WINDOW)
+                             capture_output=True, text=True, **UTF8, timeout=timeout + 20, creationflags=NO_WINDOW)
     except Exception as e:
         logging.warning(f"Bluetooth scan failed: {e}")
         return []
@@ -198,7 +199,7 @@ def auto_detect_ble_device():
         # to force the connection so we can read back which device it picked.
         result = subprocess.run(
             [binary, "-d", "", "-T", str(BLE_SCAN_TIMEOUT), "infos"],
-            capture_output=True, text=True, timeout=BLE_SCAN_TIMEOUT + 15, creationflags=NO_WINDOW
+            capture_output=True, text=True, **UTF8, timeout=BLE_SCAN_TIMEOUT + 15, creationflags=NO_WINDOW
         )
     except subprocess.TimeoutExpired:
         logging.critical("❌ BLE scan timed out. Make sure the node is powered on, in range, and already paired in Windows Bluetooth settings.")
@@ -224,7 +225,7 @@ def execute_mesh_command(args_list, timeout=30, retries=2, retry_delay=2):
     for attempt in range(retries + 1):
         try:
             with MESH_LOCK:
-                result = subprocess.run([binary] + args_list, capture_output=True, text=True, timeout=timeout, creationflags=NO_WINDOW)
+                result = subprocess.run([binary] + args_list, capture_output=True, text=True, **UTF8, timeout=timeout, creationflags=NO_WINDOW)
         except subprocess.TimeoutExpired:
             last_err = RuntimeError(f"meshcli timed out after {timeout}s (BLE connection may have stalled or the node is out of range)")
             if attempt < retries: time.sleep(retry_delay)

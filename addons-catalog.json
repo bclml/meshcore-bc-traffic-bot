@@ -9,7 +9,7 @@
       "author": "bclml",
       "description": "DriveBC, BC Ferries, BC Transit, TransLink, weather, earthquake and tsunami alerts broadcast to the mesh, with a master mute and a switch per alert type.",
       "path": "packages/broadcast_alerts",
-      "tested": "2026-10-03 with app 1.3.0"
+      "tested": "2026-10-03 with app 1.3.1"
     },
     {
       "name": "auto_reply",
@@ -18,7 +18,7 @@
       "author": "bclml",
       "description": "Keyword rules: answer the words you choose on the channels you choose, with your own reply text, sent to the channels you pick. Comes with a 'test' rule.",
       "path": "packages/auto_reply",
-      "tested": "2026-10-03 with app 1.3.0"
+      "tested": "2026-10-03 with app 1.3.1"
     }
   ]
 }

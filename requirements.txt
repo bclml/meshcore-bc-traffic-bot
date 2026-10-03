@@ -1,0 +1,7 @@
+# mcIRC needs Python 3.10+ with Tk.  Install everything with:
+#     pip install -r requirements.txt          (or, with uv:  uv sync   /   uv run mcIRC.py)
+# The BC traffic bot addon and the console agent need two more packages; the addon tells you, or:  pip install requests gtfs-realtime-bindings
+meshcore-cli>=1.5.7      # talks to the node (also installs the meshcore library and Bluetooth support)
+pyserial>=3.5            # USB serial ports
+tkintermapview>=1.29     # street map (without it the map is a plain plot)
+pillow>=10.0             # screenshots in Help > Report a bug, map tiles

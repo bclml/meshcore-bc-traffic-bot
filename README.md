@@ -40,14 +40,14 @@ Optional addons add features - for example **BC traffic bot** turns mcIRC into a
 
 - Windows 10/11 + Python 3. **Linux and macOS** also run it (*experimental, edition 0.1.0* - see below).
 - A LoRa node running **MeshCore Companion firmware**, connected by USB, Bluetooth or WiFi/TCP. Tested on a Heltec V3; the Companion protocol is the same on every board (Heltec V4/T114, LilyGo T-Beam/T-Deck/T-Echo, RAK WisBlock, Seeed Xiao/Wio Tracker, Station G2, ...), and *Scan for devices* in mcIRC finds yours. Repeater / Room-server firmware can't chat - flash the Companion build.
-- `pip install meshcore-cli pyserial` (and optionally `pip install tkintermapview` for the street map)
+- The Python packages are listed in [`requirements.txt`](requirements.txt) (`pip install -r requirements.txt`) and in [`pyproject.toml`](pyproject.toml), so [uv](https://docs.astral.sh/uv/) works too: `uv sync` then `uv run mcIRC.py`
 
 ## Linux and macOS (experimental, edition 0.1.0)
 
 The same code runs on Linux and macOS; it has had far less testing there, so expect rough edges and please report them (**Help > Report a bug**, with a screenshot if it is about how something looks).
 
 1. Install Python 3 with Tk: Debian/Ubuntu `sudo apt install python3-tk`, Fedora `sudo dnf install python3-tkinter`, macOS `brew install python-tk` (or the python.org installer).
-2. `pip install meshcore-cli pyserial tkintermapview pillow`
+2. `pip install -r requirements.txt`  (or with uv: `uv run mcIRC.py`)
 3. **Linux USB:** your user must be allowed to use serial ports: `sudo usermod -aG dialout $USER` (some distros: `uucp`), then log out and in again. Ports look like `/dev/ttyUSB0` or `/dev/ttyACM0`. **macOS USB:** ports look like `/dev/cu.usbserial-…`.
 4. Start it with `./Run_GUI.sh` (Linux) or double-click `Run_GUI.command` (macOS; the first time: `chmod +x Run_GUI.command Run_GUI.sh`), or run `python3 mcIRC.py`. Try `python3 mcIRC.py --demo` first.
 
@@ -56,7 +56,7 @@ Known differences: macOS ignores button colours (the "red when unread" switchbar
 ## Quick start (Windows)
 
 1. Clone this repo (or download it) into its own folder
-2. `pip install meshcore-cli pyserial tkintermapview`
+2. `pip install -r requirements.txt`  (or with uv: `uv run mcIRC.py` does this for you)
 3. Double-click `Run_GUI.bat` (no console window stays open). Try it without a radio first: `python mcIRC.py --demo`
 4. Options > Connect > *Scan for devices...* > pick your node > OK, then File > Connect
 

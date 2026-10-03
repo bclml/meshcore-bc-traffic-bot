@@ -26,3 +26,8 @@ addons/*
 update_state.json
 backup/
 diagnostics/
+
+# Python environments
+.venv/
+venv/
+uv.lock.bak

@@ -7,7 +7,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(BASE_DIR, "gui_settings.json")
 
 DEFAULT_SETTINGS = {
-    "mode": "usb", "port": "auto", "baud": "", "ble_target": "", "tcp_host": "", "tcp_port": 5000, "node_name": "MyNode", "location": "Surrey",
+    "mode": "usb", "port": "auto", "last_port": "", "baud": "", "ble_target": "", "tcp_host": "", "tcp_port": 5000, "node_name": "MyNode", "location": "Surrey",
     "poll_seconds": 20,
     "node_lat": 49.19, "node_lon": -122.85,
     "node_prune_days": 10,       # forget nodes not seen for this many days (0 = never)

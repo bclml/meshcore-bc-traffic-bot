@@ -121,10 +121,10 @@ def explain_failure(text):
     return (text or "unknown error").strip().splitlines()[-1][:200] if (text or "").strip() else "unknown error"
 
 
-def probe_device(conn_args, timeout=25):
+def probe_device(conn_args, timeout=25, retries=1):
     """Asks a device who it is.  -> {'ok': True, 'name', 'model', 'fw', 'max_contacts'} or {'ok': False, 'why': readable reason}."""
     try:
-        res = execute_mesh_command(conn_args + [".infos", ".ver"], timeout=timeout, retries=1)
+        res = execute_mesh_command(conn_args + [".infos", ".ver"], timeout=timeout, retries=retries)
     except Exception as e:
         return {"ok": False, "why": explain_failure(str(e))}
     info = ver = {}
@@ -135,16 +135,22 @@ def probe_device(conn_args, timeout=25):
     return {"ok": True, "name": info.get("name", "?"), "model": ver.get("model", "?"), "fw": ver.get("ver", "?"), "max_contacts": ver.get("max_contacts")}
 
 
-def auto_detect_usb_port():
-    """Finds the MeshCore node on USB.  One candidate -> use it; several -> ask each who it is and take the first Companion."""
+def auto_detect_usb_port(prefer=None, should_stop=None):
+    """Finds the MeshCore node on USB.  The port that worked last time (prefer) is used straight away without probing; a single
+    candidate is used as is; with several, each is asked (quickly) who it is and the first Companion wins.  should_stop() lets the
+    caller cancel between probes."""
     cands = usb_candidates()
     if not cands:
         logging.critical("❌ No USB serial device found. Make sure the node is connected with a data cable (not charge-only) and its USB driver is installed.")
         return None
+    if prefer and any(c["device"] == prefer for c in cands):
+        logging.info(f"✅ Using {prefer} (the port that worked last time)")
+        return ["-s", prefer]
     if len(cands) > 1:
         logging.info("Several USB serial devices found (" + ", ".join(f"{c['device']}: {c['description']}" for c in cands) + ") - checking which is a MeshCore Companion...")
         for c in cands:
-            r = probe_device(["-s", c["device"]])
+            if should_stop and should_stop(): return None
+            r = probe_device(["-s", c["device"]], timeout=12, retries=0)
             logging.info(f"  {c['device']}: " + (f"{r['model']} '{r['name']}' fw {r['fw']}" if r["ok"] else r["why"]))
             if r["ok"]:
                 logging.info(f"✅ Using {c['device']}")
@@ -170,7 +176,7 @@ def scan_ble(timeout=6):
     return lines
 
 
-def build_connection_args(mode, port="auto", ble_target="", tcp_host="", tcp_port=5000, baud=""):
+def build_connection_args(mode, port="auto", ble_target="", tcp_host="", tcp_port=5000, baud="", prefer_port="", should_stop=None):
     """meshcli connection arguments for USB serial, Bluetooth (first device found, or a given name/address) or WiFi/TCP.  None if impossible."""
     if mode == "tcp":
         if not str(tcp_host).strip():
@@ -179,7 +185,7 @@ def build_connection_args(mode, port="auto", ble_target="", tcp_host="", tcp_por
         return ["-t", str(tcp_host).strip(), "-p", str(tcp_port)]
     if mode == "bluetooth":
         return ["-a", ble_target.strip()] if ble_target.strip() else auto_detect_ble_device()
-    args = ["-s", port.strip()] if port.strip() and port.strip().lower() != "auto" else auto_detect_usb_port()
+    args = ["-s", port.strip()] if port.strip() and port.strip().lower() != "auto" else auto_detect_usb_port(prefer_port or None, should_stop)
     return args + ["-b", str(baud).strip()] if args and str(baud).strip() else args
 
 

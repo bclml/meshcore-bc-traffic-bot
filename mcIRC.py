@@ -93,13 +93,17 @@ class CoreWorker:
         q = self.app.q
         q.put(("state", "connecting", ""))
         try:
-            args = ea.build_connection_args(s["mode"], s["port"], s["ble_target"], s["tcp_host"], s["tcp_port"], s["baud"])
-            if not args: return
+            args = ea.build_connection_args(s["mode"], s["port"], s["ble_target"], s["tcp_host"], s["tcp_port"], s["baud"],
+                                            prefer_port=s.get("last_port", ""), should_stop=self.stop_evt.is_set)
+            if not args or self.stop_evt.is_set(): return
             ea.CONNECTION_ARGS = args
             ea.resolve_channel_indices()
+            if self.stop_evt.is_set(): return
             q.put(("channels",))
             q.put(("state", "connected", " ".join(args)))
-            try: q.put(("nodeinfo", gui_nodecfg.read_node()))
+            try:
+                q.put(("nodeinfo", gui_nodecfg.read_node()))
+                if args[0] == "-s": q.put(("lastport", args[1]))   # it answered: next time use this port without probing
             except Exception as e:
                 why = ea.explain_failure(str(e))
                 logging.warning(f"Could not read the node's own settings: {why}")
@@ -466,6 +470,19 @@ class App:
             if r["newer"]: self.status_line(f"*** Update available: version {r['remote']} (you have {r['local']}) - Help > Check for updates.", "warn")
         self.bg(gui_update.check, done)
 
+    def _h_lastport(self, port):
+        if self.settings.get("last_port") != port:
+            self.settings["last_port"] = port
+            self.save()
+
+    def raise_window(self):
+        r = self.root
+        r.deiconify()
+        r.lift()
+        r.attributes("-topmost", True)
+        r.after(300, lambda: r.attributes("-topmost", False))
+        r.focus_force()
+
     def _h_call(self, fn): fn()
 
     def tick(self):
@@ -516,7 +533,8 @@ class App:
 
     def connect(self):
         if self.worker.running:
-            self.status_line("*** Already connected.", "warn")
+            if self.worker.stop_evt.is_set(): self.status_line("*** Still cancelling the previous attempt - try again in a few seconds.", "warn")
+            else: self.status_line("*** Already connected." if self.connected else "*** Already connecting - this can take a little while.", "warn")
             return
         self.apply_settings()
         self.status_line("*** Connecting to the node...", "info")
@@ -525,7 +543,7 @@ class App:
     def disconnect(self):
         if self.worker.running:
             self.worker.stop()
-            self.status_line("*** Disconnecting...", "info")
+            self.status_line("*** Disconnecting..." if self.connected else "*** Cancelling the connection attempt (it stops once the current radio command finishes)...", "info")
 
     def open_options(self, page="Connect"):
         d = OptionsDialog(self)
@@ -660,8 +678,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--demo", action="store_true", help="fill the UI with fake data; never touches the radio")
     args = ap.parse_args()
+    holder, lock = {}, None
+    if not args.demo:   # one copy at a time: two would fight over the radio port
+        import gui_single
+        lock = gui_single.acquire(lambda: holder["app"].q.put(("call", holder["app"].raise_window)) if "app" in holder else None)
+        if lock is None and gui_single.notify_existing():
+            print("mcIRC is already running - brought it to the front.")
+            return
     root = tk.Tk()
-    App(root, demo=args.demo)
+    holder["app"] = App(root, demo=args.demo)
     root.mainloop()
 
 

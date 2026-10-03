@@ -1,0 +1,4 @@
+# Shows a "Sponsor" button on the repository page. Donating is optional and never required.
+custom:
+  - "https://www.paypal.com/ncp/payment/TVFX47SD92LSE"
+  - "https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=C2AYGMYMTKVZJ&currency_code=CAD"

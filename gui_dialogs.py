@@ -28,7 +28,7 @@ class OptionsDialog(tk.Toplevel):
         self.geometry("720x540")
         self.transient(app.root)
         keys = ("mode", "port", "baud", "ble_target", "tcp_host", "tcp_port", "node_name", "location", "poll_seconds", "node_lat", "node_lon", "node_prune_days",
-                "node_sync_minutes", "radio_capacity", "prune_radio", "advert_listen", "advert_notices", "show_time", "font_size", "auto_connect", "log_enabled", "log_history", "check_updates",
+                "node_sync_minutes", "radio_capacity", "prune_radio", "auto_reset_radio", "advert_listen", "advert_notices", "show_time", "font_size", "auto_connect", "log_enabled", "log_history", "check_updates",
                 "theme", "highlight_words", "sounds_enabled", "sound_private", "sound_mention", "sound_highlight", "sound_channel", "sound_custom")
         self.vars = {k: (tk.BooleanVar if isinstance(s[k], bool) else tk.StringVar)(value=s[k] if isinstance(s[k], bool) else str(s[k])) for k in keys}
         body = tk.Frame(self, bg=BG)
@@ -88,6 +88,10 @@ class OptionsDialog(tk.Toplevel):
         self._row(f, "Node nick:", "node_name")
         self._row(f, "Message poll (sec):", "poll_seconds", 6)
         tk.Checkbutton(f, text="Connect automatically on startup", variable=self.vars["auto_connect"], bg=BG).pack(anchor="w", pady=4)
+        tk.Checkbutton(f, text="Restart a silent radio automatically (USB reset line, about 5 minutes after it stops answering)", variable=self.vars["auto_reset_radio"], bg=BG,
+                       wraplength=420, justify="left").pack(anchor="w")
+        tk.Label(f, text="Off by default. Only for USB boards with a CP210x / CH340 / FTDI chip (Heltec V3, LilyGo, ...); at most twice per session. "
+                         "Tools > Reset radio via USB... does it once, on request.", bg=BG, fg="#555", wraplength=420, justify="left").pack(anchor="w")
         return f
 
     def scan_devices(self):

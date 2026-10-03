@@ -537,7 +537,9 @@ def broadcast_via_cli(source, title, description, is_clear=False, forced_region=
     try:
         execute_mesh_command(io.CONNECTION_ARGS + ["chan", str(chan_idx), msg])
         _emit("out", chan_idx, msg, alert="clear" if is_clear else "new")
-    except Exception as err: logging.error(f"Mesh CLI broadcast failed: {err}")
+    except Exception as err:
+        logging.error(f"Mesh CLI broadcast failed: {err}")
+        io.queue_for_retry(chan_idx, msg, "clear" if is_clear else "new", guid, is_clear)       # sent later if the radio comes back in time
 
 def handle_weather_broadcast(source, title, body, is_clear=False, specific_region=None):
     broadcast_via_cli(source, title, body, is_clear, specific_region)
@@ -562,6 +564,7 @@ async def broadcast_critical_all_channels(msg_body, label="ALERT", kind=None):
             _emit("out", idx, msg, alert="critical")
         except Exception as err:
             logging.error(f"{label} broadcast failed on channel {idx}: {err}")
+            io.queue_for_retry(idx, msg, "critical")
         await asyncio.sleep(BROADCAST_PACING_SECONDS)
 
 async def check_tsunami_warnings():

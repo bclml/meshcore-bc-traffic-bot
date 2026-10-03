@@ -26,6 +26,7 @@ from gui_logs import WindowLog, LOG_DIR, logged_windows
 import gui_update
 import gui_style
 import gui_diag
+import gui_health
 import gui_platform
 from gui_adverts import AdvertWatcher
 from gui_report import BugReportDialog
@@ -171,6 +172,7 @@ class CoreWorker:
                     ea.resolve_channel_indices()
                     q.put(("channels",))
                 ea.fetch_incoming_messages()  # each message reaches the GUI through ea.GUI_CALLBACK
+                self.app.recovery.maybe()      # only acts if the user switched "restart a silent radio" on
                 if now - last_sync >= self.app.settings["node_sync_minutes"] * 60:
                     last_sync = now
                     self.app.node_sync_worker()
@@ -208,6 +210,8 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         self.nodes = NodeStore(":memory:") if demo else NodeStore()
         self.addons = AddonManager(self)
         self.adverts = AdvertWatcher(self)
+        self.recovery = gui_health.Recovery(self)
+        ea.HEALTH.listeners.append(lambda ev, info: self.q.put(("health", ev, info)))      # called on the connection thread
         if demo: self.settings["addons"], self.settings["addons_enabled"] = {}, {n: True for n in self.addons.discover()}
         gui_style.apply_classic(root)   # old-mIRC chrome: must run before any widget exists
         self.font = gui_style.chat_font(self.settings["font_size"])
@@ -261,6 +265,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         t = tk.Menu(m, tearoff=0)
         t.add_command(label="Addons...", command=self.open_addons)
         t.add_command(label="This node's settings...", command=lambda: self.open_options("Node: radio"))
+        t.add_command(label="Reset radio via USB...", command=self.reset_radio_now)
         t.add_command(label="Open logs folder", command=lambda: (os.makedirs(LOG_DIR, exist_ok=True), gui_platform.open_path(LOG_DIR)))
         self.addon_menu = tk.Menu(m, tearoff=0)
         h = tk.Menu(m, tearoff=0)
@@ -310,6 +315,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         self.sb_state = tk.Label(bar, bg=BG, relief="sunken", anchor="w", text="Not connected", width=34)
         self.sb_radio = tk.Label(bar, bg=BG, relief="sunken", anchor="w", text="")
         self.sb_clock = tk.Label(bar, bg=BG, relief="sunken", anchor="e", width=10)
+        self.sb_warn = tk.Label(bar, bg=BG, fg="#c00000", relief="sunken", anchor="w", font=(gui_platform.UI_FONT_NAME, gui_platform.UI_FONT_SIZE, "bold"))
         self.sb_state.pack(side="left")
         self.sb_clock.pack(side="right")
         self.sb_radio.pack(side="left", fill="x", expand=True)
@@ -462,6 +468,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
                                              "snr": extra.get("snr"), "hops": hops, "raw": extra.get("raw")})
 
     def _h_log(self, level, msg):
+        if ea.HEALTH.is_down and msg.startswith("Failed to poll for incoming messages"): return      # one "radio not responding" notice is enough; the log has the rest
         self.status_line("*** " + msg, "error" if level >= logging.ERROR else "warn" if level >= logging.WARNING else "info", log=False)
 
     def _h_state(self, state, detail):
@@ -508,6 +515,43 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
             try:
                 if w is not None and w.winfo_exists(): getattr(w, update)()
             except Exception: pass
+
+    def _h_health(self, ev, info):
+        """The radio stopped answering / answers again / was restarted."""
+        clock = lambda t: datetime.datetime.fromtimestamp(t).strftime("%H:%M")
+        gui_diag.event("health", f"{ev} {info}")
+        if ev == "down":
+            self.sb_warn.config(text=f" RADIO NOT RESPONDING since {clock(info['since'])} ")
+            self.sb_warn.pack(side="left", after=self.sb_state)
+            waiting = len(ea.PENDING_SENDS)
+            self.status_line(f"*** The radio has not answered since {clock(info['since'])}. Check the USB cable or press the board's reset button. "
+                             "Messages you send are marked NOT SENT; alerts are kept for up to 30 minutes and go out when it answers again.", "error")
+        elif ev == "up":
+            self.sb_warn.pack_forget()
+            mins = max(1, int((time.time() - info["since"]) / 60))
+            waiting = len(ea.PENDING_SENDS)
+            self.status_line(f"*** The radio is answering again (it was silent for about {mins} min)." + (f" Sending {waiting} queued alert(s)..." if waiting else ""), "info")
+        elif ev == "reset":
+            self.status_line(f"*** Restarting the radio on {info['port']} ({info['how']}, {info['chip']}) by pulsing its reset line...", "warn")
+        elif ev == "reset_refused":
+            self.status_line(f"*** Not restarting the radio: {info['why']}.", "warn")
+        elif ev == "reset_failed":
+            self.status_line(f"*** Could not restart the radio: {info['why']}", "error")
+
+    def unsent(self, w, text, why):
+        """A message that did not go out: say so right where it was typed (never leave it looking delivered)."""
+        short = text if len(text) <= 60 else text[:59] + "..."
+        gui_diag.event("unsent", why)
+        gui_diag.count("messages_not_sent")
+        (w or self.status).write(self.stamp() + [(f"* NOT SENT ({why}): {short}", "error")])
+        if w is not None and w is not self.current: self.status_line(f"*** Not sent to {w.name}: {why}", "error")
+
+    def reset_radio_now(self):
+        ok, why = gui_health.reset_allowed(ea.CONNECTION_ARGS)
+        if not ok: return messagebox.showinfo("Reset radio", f"Can't do this automatically: {why}.", parent=self.root)
+        if not messagebox.askyesno("Reset radio", f"Restart the node ({why}) by pulsing its USB reset line?\n\nIt reboots and reconnects in about 10 seconds. "
+                                   "Use this when the radio has stopped answering.", parent=self.root): return
+        self.bg(lambda: self.recovery.reset("manual"), lambda r: None)
 
     def _h_nodeinfo(self, node):
         self.adopt_node_info(node)
@@ -681,9 +725,11 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         if len(text) > ea.MESH_MSG_MAX_CHARS: self.status_line(f"*** Message is {len(text)} chars; the node may cut it off.", "warn")
         cmd = ["public", text] if idx == 0 else ["chan", str(idx), text]
         w = self.windows.get(name)
+        if ea.HEALTH.is_down:                      # don't make people wait a minute to learn what we already know
+            return self.unsent(w, text, "the radio is not answering")
         if w: self.chat_line(w, self.settings["node_name"], text, "self")
         self.bg(lambda: ea.execute_mesh_command(ea.CONNECTION_ARGS + cmd),
-                lambda r: isinstance(r, Exception) and self.status_line(f"*** Send to {name} failed: {r}", "error"))
+                lambda r: isinstance(r, Exception) and self.unsent(w, text, ea.explain_failure(str(r))))
 
     def command(self, line):
         cmd, _, arg = line.partition(" ")

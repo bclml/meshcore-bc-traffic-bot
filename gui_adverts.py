@@ -53,7 +53,8 @@ class AdvertWatcher:
             except OSError: pass
 
     def enabled(self):
-        return bool(self.app.settings.get("advert_listen", True)) and not self.disabled and helper_args(io.CONNECTION_ARGS) is not None
+        return (bool(self.app.settings.get("advert_listen", True)) and not self.disabled and not io.HEALTH.is_down
+                and helper_args(io.CONNECTION_ARGS) is not None)
 
     def listen(self, seconds, stop_evt):
         """Use `seconds` of idle time listening (or just waiting when listening is off / unavailable).  Runs on the connection thread."""

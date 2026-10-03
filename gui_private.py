@@ -78,12 +78,13 @@ class PrivateMixin:
             self.status_line(f"*** Can't message {w.name[1:]}: " + ("not connected." if not self.connected else "that node's key isn't known yet."), "error")
             return
         w.key = key
+        if io.HEALTH.is_down: return self.unsent(w, text, "the radio is not answering")
         self.chat_line(w, self.settings["node_name"], text, "self")
         def work():
             res = io.execute_mesh_command(io.CONNECTION_ARGS + ["msg", key, text])
             out = f"{res.stdout}\n{res.stderr}"
             if re.search(r"unknown destination|\berror\b", out, re.IGNORECASE): raise RuntimeError(out.strip().splitlines()[-1])
-        self.bg(work, lambda r: isinstance(r, Exception) and self.status_line(f"*** Message to {w.name[1:]} failed: {r}", "error"))
+        self.bg(work, lambda r: isinstance(r, Exception) and self.unsent(w, text, io.explain_failure(str(r))))
 
     # ---- turning "@3ddcdf84" into the real name ----
     def resolve_key_windows(self, ask_radio=False):

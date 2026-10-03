@@ -241,6 +241,7 @@ class CommandsMixin:
         key = row["public_key"] if row else w.key
         if not self.connected or not key:
             return self.status_line("*** Not connected, or that node's key isn't known yet.", "error")
+        if io.HEALTH.is_down: return w.write(self.stamp() + [("* NOT SENT (the radio is not answering): " + (text or "login"), "error")])
         pw = (self.admin_pw or {}).get((w.key or w.name)[:12])
         args = (["login", key, pw] if pw else []) + (["cmd", key, text, "wmt8"] if text else [])
         w.write(self.stamp() + [(f"* {announce or 'sent to ' + w.name[1:] + ': ' + text}", "info")])

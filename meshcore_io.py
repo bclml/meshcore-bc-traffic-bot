@@ -2,7 +2,7 @@
 
 Used by the GUI core and by the optional broadcast-alerts engine (emergency_agent.py).  Mutable shared state
 (CONNECTION_ARGS, CHANNEL_INDEX_BY_NAME, GUI_CALLBACK) lives here; other modules read it as meshcore_io.NAME."""
-import json, logging, os, re, subprocess, sys, threading, time
+import collections, json, logging, os, re, subprocess, sys, threading, time
 
 import serial.tools.list_ports
 
@@ -246,6 +246,82 @@ def auto_detect_ble_device():
     logging.critical("❌ No MeshCore Bluetooth device detected. Make sure the node is powered on, within range, and paired with this computer first (Windows Settings > Bluetooth & devices > Add device).")
     return None
 
+class RadioHealth:
+    """Counts how many meshcli commands in a row failed for good (after their own retries).  DOWN_AFTER in a row = the radio is not answering.
+    Listeners get ("down", info) once when that happens and ("up", info) when a command works again; they are called on whatever thread ran the command."""
+    DOWN_AFTER = 3
+
+    def __init__(self):
+        self.fails, self.first_fail, self.down_since, self.last_error, self.listeners = 0, None, None, "", []
+
+    @property
+    def is_down(self): return self.down_since is not None
+
+    def _notify(self, event, info):
+        for fn in list(self.listeners):
+            try: fn(event, info)
+            except Exception: pass
+
+    def success(self):
+        was_down, since, fails = self.is_down, self.down_since, self.fails
+        self.fails, self.first_fail, self.down_since = 0, None, None
+        if was_down: self._notify("up", {"since": since, "fails": fails})
+
+    def failure(self, why):
+        now = time.time()
+        self.fails += 1
+        self.last_error = str(why)
+        if self.first_fail is None: self.first_fail = now
+        if self.fails == self.DOWN_AFTER and self.down_since is None:
+            self.down_since = self.first_fail
+            self._notify("down", {"since": self.down_since, "why": self.last_error})
+
+
+HEALTH = RadioHealth()
+
+# Alerts that could not be sent (the radio was not answering) wait here and go out as soon as a poll works again, unless they are too old to matter.
+PENDING_SENDS = collections.deque()
+PENDING_MAX_AGE = 30 * 60
+PENDING_MAX_ITEMS = 40
+
+
+def queue_for_retry(chan_idx, msg, alert="new", guid=None, is_clear=False):
+    """Remember a transmission that failed.  A CLEARED notice cancels a still-waiting NEW notice for the same incident (neither is sent)."""
+    if guid:
+        if is_clear:
+            for item in list(PENDING_SENDS):
+                if item["guid"] == guid and item["alert"] == "new":
+                    PENDING_SENDS.remove(item)
+                    logging.info(f"Dropped the queued alert for {guid}: it cleared before it could be sent.")
+                    return
+        elif any(i["guid"] == guid and i["alert"] == alert and i["idx"] == chan_idx for i in PENDING_SENDS): return
+    if len(PENDING_SENDS) >= PENDING_MAX_ITEMS: PENDING_SENDS.popleft()
+    PENDING_SENDS.append({"idx": chan_idx, "msg": msg, "alert": alert, "guid": guid, "queued": time.time()})
+    logging.warning(f"Queued for later (radio not answering): {len(PENDING_SENDS)} waiting.")
+
+
+def flush_pending_sends(pacing=1.5):
+    """Send what was queued, oldest first.  Stops at the first failure (tried again at the next good poll)."""
+    sent = 0
+    while PENDING_SENDS and not HEALTH.is_down:
+        item = PENDING_SENDS[0]
+        if time.time() - item["queued"] > PENDING_MAX_AGE:
+            PENDING_SENDS.popleft()
+            logging.warning(f"Dropped a queued alert that waited more than {PENDING_MAX_AGE // 60} minutes: {item['msg'][:60]}")
+            continue
+        idx = item["idx"]
+        try: execute_mesh_command(CONNECTION_ARGS + (["public", item["msg"]] if idx == 0 else ["chan", str(idx), item["msg"]]), retries=1)
+        except Exception as e:
+            logging.warning(f"Queued alert still not sent ({e}); will try again.")
+            return sent
+        PENDING_SENDS.popleft()
+        sent += 1
+        logging.info(f"Sent a queued alert ({int(time.time() - item['queued'])} s late) to Channel Index {idx}: {item['msg']}")
+        _emit("out", idx, item["msg"], alert=item["alert"])
+        time.sleep(pacing)
+    return sent
+
+
 def _trace(args, attempt, outcome, started, detail=""):
     if TRACE is None: return
     try: TRACE(args, attempt + 1, outcome, time.time() - started, detail)
@@ -276,8 +352,10 @@ def execute_mesh_command(args_list, timeout=30, retries=2, retry_delay=2):
             _trace(args_list, attempt, "FAILED", started, hit)
         else:
             _trace(args_list, attempt, "ok", started, f"{len(result.stdout)} chars")
+            HEALTH.success()
             return result
         if attempt < retries: time.sleep(retry_delay)
+    HEALTH.failure(last_err)
     raise last_err
 
 def resolve_channel_indices():
@@ -396,6 +474,7 @@ def fetch_incoming_messages():
     except Exception as e:
         logging.error(f"Failed to poll for incoming messages: {e}")
         return found
+    if PENDING_SENDS: flush_pending_sends()          # the radio just answered: send what was waiting
     combined = f"{result.stdout}\n{result.stderr}"
     # TEMPORARY DIAGNOSTIC: log every non-trivial .sync_msgs response verbatim, so a real incoming
     # message's actual JSON shape is visible in the log instead of having to guess at field names

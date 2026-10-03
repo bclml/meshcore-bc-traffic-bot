@@ -2,6 +2,7 @@
 contributed by addons (e.g. incidents, earthquakes).  Everything has a show/hide toggle.
 
 Uses real OpenStreetMap tiles when `pip install tkintermapview` is available, otherwise a plain lat/lon plot."""
+import gui_platform
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -151,4 +152,4 @@ class MapWindow(tk.Toplevel):
         for lat, lon, label, fill, outline, info in pts:
             px, py = x(lon), y(lat)
             c.create_oval(px - 4, py - 4, px + 4, py + 4, fill=fill, outline=outline)
-            if label: c.create_text(px + 7, py, text=label, anchor="w", font=("Segoe UI", 8))
+            if label: c.create_text(px + 7, py, text=label, anchor="w", font=(gui_platform.DIALOG_FONT_NAME, 8))

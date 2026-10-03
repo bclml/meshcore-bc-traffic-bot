@@ -1,5 +1,6 @@
 """mIRC-style dialogs: Options (category tree + pages, including pages contributed by addons), Addons manager,
 node list, channel list, About."""
+import gui_platform
 import os, time
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -71,7 +72,7 @@ class OptionsDialog(tk.Toplevel):
         tk.Label(r, text=label, bg=BG, width=30, anchor="w").pack(side="left")
         tk.Entry(r, textvariable=self.vars[key], width=width, show=show or "").pack(side="left")
 
-    def _head(self, f, text): tk.Label(f, text=text, bg=BG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+    def _head(self, f, text): tk.Label(f, text=text, bg=BG, font=(gui_platform.DIALOG_FONT_NAME, 9, "bold")).pack(anchor="w")
 
     def _page_connect(self, f):
         self._head(f, "Connection to your MeshCore node")
@@ -154,7 +155,7 @@ class OptionsDialog(tk.Toplevel):
         tk.Checkbutton(f, text="Check for updates when the GUI starts (once a day)", variable=self.vars["check_updates"], bg=BG).pack(anchor="w", pady=(8, 0))
         tk.Checkbutton(f, text="Keep a log file per window (logs/ folder, one .txt each)", variable=self.vars["log_enabled"], bg=BG).pack(anchor="w", pady=(8, 0))
         self._row(f, "Log lines shown after restart:", "log_history", 6)
-        ttk.Button(f, text="Open logs folder", command=lambda: (os.makedirs(LOG_DIR, exist_ok=True), os.startfile(LOG_DIR))).pack(anchor="w", pady=4)
+        ttk.Button(f, text="Open logs folder", command=lambda: (os.makedirs(LOG_DIR, exist_ok=True), gui_platform.open_path(LOG_DIR))).pack(anchor="w", pady=4)
         return f
 
     def apply(self):
@@ -321,5 +322,7 @@ class ChannelListDialog(tk.Toplevel):
 
 
 def show_about(root):
-    messagebox.showinfo("About", "mcIRC\n\nAn mIRC-style chat client for MeshCore nodes.\n"
+    import gui_update
+    ed = gui_platform.edition_label()
+    messagebox.showinfo("About", f"mcIRC {gui_update.local_version()}" + (f"\n{ed}" if ed else "") + "\n\nAn mIRC-style chat client for MeshCore nodes.\n"
                        "Alerts, broadcasting and anything else are addons (Tools > Addons).", parent=root)

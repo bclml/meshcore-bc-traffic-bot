@@ -5,7 +5,11 @@ The core does chat (channel windows, nick list, input line), the node list/map w
 settings.  Everything else - including broadcasting traffic/weather/earthquake alerts - is an addon in addons/
 (Tools > Addons).  Run:  python mcIRC.py     (add --demo to try it with fake data and no radio)"""
 import argparse, datetime, logging, os, queue, re, sys, tempfile, threading, time, traceback
-import tkinter as tk
+try:
+    import tkinter as tk
+except ImportError:      # Linux Pythons often ship without Tk
+    import gui_platform as _gp
+    sys.exit("mcIRC needs Tk. " + _gp.tk_missing_hint())
 import tkinter.font as tkfont
 from tkinter import ttk, messagebox
 
@@ -22,6 +26,7 @@ from gui_logs import WindowLog, LOG_DIR, logged_windows
 import gui_update
 import gui_style
 import gui_diag
+import gui_platform
 from gui_adverts import AdvertWatcher
 from gui_report import BugReportDialog
 from gui_switchbar import SwitchBar
@@ -256,7 +261,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         t = tk.Menu(m, tearoff=0)
         t.add_command(label="Addons...", command=self.open_addons)
         t.add_command(label="This node's settings...", command=lambda: self.open_options("Node: radio"))
-        t.add_command(label="Open logs folder", command=lambda: (os.makedirs(LOG_DIR, exist_ok=True), os.startfile(LOG_DIR)))
+        t.add_command(label="Open logs folder", command=lambda: (os.makedirs(LOG_DIR, exist_ok=True), gui_platform.open_path(LOG_DIR)))
         self.addon_menu = tk.Menu(m, tearoff=0)
         h = tk.Menu(m, tearoff=0)
         h.add_command(label="Commands", command=lambda: self.command("help"))
@@ -269,7 +274,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
             if label not in ("Project page on GitHub...", "Report a bug..."): h.add_command(label=label, command=lambda l=label: open_link(l))
         h.add_separator()
         h.add_command(label="Project page on GitHub...", command=lambda: open_link("Project page on GitHub..."))
-        h.add_command(label=f"About (version {gui_update.local_version()})", command=lambda: show_about(self.root))
+        h.add_command(label=f"About (version {gui_platform.version_text(gui_update.local_version())})", command=lambda: show_about(self.root))
         win = tk.Menu(m, tearoff=0)
         win.config(postcommand=lambda: self._fill_window_menu(win))
         for label, menu in (("File", f), ("View", v), ("Tools", t), ("Addons", self.addon_menu), ("Window", win), ("Help", h)): m.add_cascade(label=label, menu=menu)
@@ -333,8 +338,8 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         self.nicklist = tk.Listbox(mid, width=16, font=self.font, bg="white", relief="sunken", bd=2, activestyle="none", exportselection=False)
         self.nicklist.pack(side="right", fill="y")
         self.nicklist.bind("<Double-Button-1>", self.nick_dblclick)
-        self.nicklist.bind("<Button-3>", self._nick_menu)
-        self.tree.bind("<Button-3>", self._tree_menu)
+        gui_platform.bind_right_click(self.nicklist, self._nick_menu)
+        gui_platform.bind_right_click(self.tree, self._tree_menu)
         self.stack = tk.Frame(mid, bg=BG)
         self.stack.pack(side="left", fill="both", expand=True)
         self.stack.grid_rowconfigure(0, weight=1)
@@ -406,7 +411,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
 
     def open_diag_folder(self):
         os.makedirs(gui_diag.directory(), exist_ok=True)
-        os.startfile(gui_diag.directory())
+        gui_platform.open_path(gui_diag.directory())
 
     def status_line(self, text, tag="text", log=True):
         if log and tag in ("error", "warn"): gui_diag.event(tag, text)       # (records that came through logging are already in the diagnostic log)

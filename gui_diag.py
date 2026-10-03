@@ -18,6 +18,8 @@ import tempfile
 import threading
 import traceback
 
+import gui_platform
+
 KEEP = 5
 MAX_BYTES = 1_500_000
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -203,8 +205,12 @@ def start(version="?", demo=False):
         for old in session_files()[:-(KEEP - 1)] if KEEP > 1 else session_files():
             try: os.remove(old)
             except OSError: pass
+        saved = sorted(glob.glob(os.path.join(d, "report-*")))          # reports / screenshots from "Report a bug": keep the newest 10 files
+        for old in saved[:-10]:
+            try: os.remove(old)
+            except OSError: pass
         _state.update(path=path, file=open(path, "a", encoding="utf-8"), bytes=0, capped=False, counts={})
-        header = f"mcIRC {version}{' (demo)' if demo else ''}  |  {_environment()}"
+        header = f"mcIRC {gui_platform.version_text(version)}{' (demo)' if demo else ''}  |  {_environment()}"
         _state["header"] = header
         _write(f"=== mcIRC diagnostic log - no message text is recorded ===\n=== {scrub(header)} ===\n=== started {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ===")
         logging.getLogger().addHandler(_Handler(logging.INFO))

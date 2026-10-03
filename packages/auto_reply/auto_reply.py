@@ -2,6 +2,7 @@
 text, and the channels the reply goes to.  The first matching rule answers.  Example: "test" typed on #bot-van gets
 "Test received, 2 hops"; "test" typed anywhere else is told to use #bot-van; "!traffic" on Public is answered on #drivebc.
 Standalone - needs nothing else installed."""
+import gui_platform
 import re
 import time
 import tkinter as tk
@@ -44,7 +45,7 @@ def match_rule(rule, text):
 
 class Addon(AddonBase):
     title = "Auto reply"
-    version = "1.1.0"
+    version = "1.1.1"
     author = "bclml"
     description = "Keyword rules: answer chosen words on chosen channels with your own text, to the channels you pick."
 
@@ -100,7 +101,7 @@ class Addon(AddonBase):
         f = tk.Frame(parent, bg=bg)
         self.rules = [dict(r) for r in self.api.get("rules", DEFAULT_RULES)]
         self.enabled_var = tk.BooleanVar(value=self.api.get("enabled", True))
-        tk.Label(f, text="Auto reply", bg=bg, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(f, text="Auto reply", bg=bg, font=(gui_platform.DIALOG_FONT_NAME, 9, "bold")).pack(anchor="w")
         tk.Checkbutton(f, text="Auto reply is ON", variable=self.enabled_var, bg=bg).pack(anchor="w")
         cols = (("on", "On", 30), ("name", "Rule", 90), ("keywords", "Keywords", 110), ("listen", "Heard on", 90), ("to", "Replies to", 90))
         self.tree = ttk.Treeview(f, columns=[c for c, _, _ in cols], show="headings", height=7, selectmode="browse")

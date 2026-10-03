@@ -23,6 +23,11 @@ body:
       label: Troubleshooting log
       description: Help > Report a bug... fills this in for you (it never contains message text). Otherwise paste the newest file from the diagnostics folder (Help > Open troubleshooting logs folder).
       render: text
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot (optional)
+      description: Paste (Ctrl+V) or drag a picture here. Help > Report a bug... can take one for you - it blacks out chat text and names by default.
   - type: input
     id: device
     attributes:

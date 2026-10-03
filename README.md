@@ -1,6 +1,6 @@
 # mcIRC
 
-An **mIRC-style chat client for [MeshCore](https://meshcore.co.uk/) LoRa mesh nodes** on Windows: channels and direct messages in the classic treebar / switchbar / nick-list layout, a node list and map, full control of your node's settings, per-window log files, and **addons** for anything more. It works with any board running MeshCore Companion firmware over USB, Bluetooth or WiFi.
+An **mIRC-style chat client for [MeshCore](https://meshcore.co.uk/) LoRa mesh nodes** for Windows (and, experimentally, Linux and macOS): channels and direct messages in the classic treebar / switchbar / nick-list layout, a node list and map, full control of your node's settings, per-window log files, and **addons** for anything more. It works with any board running MeshCore Companion firmware over USB, Bluetooth or WiFi.
 
 Optional addons add features - for example **BC traffic bot** turns mcIRC into a BC traffic / ferry / transit / weather / earthquake / tsunami alert bot (see [BC alerts bot](#bc-alerts-bot)).
 
@@ -38,11 +38,22 @@ Optional addons add features - for example **BC traffic bot** turns mcIRC into a
 
 ## Requirements
 
-- Windows 10/11 + Python 3
+- Windows 10/11 + Python 3. **Linux and macOS** also run it (*experimental, edition 0.1.0* - see below).
 - A LoRa node running **MeshCore Companion firmware**, connected by USB, Bluetooth or WiFi/TCP. Tested on a Heltec V3; the Companion protocol is the same on every board (Heltec V4/T114, LilyGo T-Beam/T-Deck/T-Echo, RAK WisBlock, Seeed Xiao/Wio Tracker, Station G2, ...), and *Scan for devices* in mcIRC finds yours. Repeater / Room-server firmware can't chat - flash the Companion build.
 - `pip install meshcore-cli pyserial` (and optionally `pip install tkintermapview` for the street map)
 
-## Quick start
+## Linux and macOS (experimental, edition 0.1.0)
+
+The same code runs on Linux and macOS; it has had far less testing there, so expect rough edges and please report them (**Help > Report a bug**, with a screenshot if it is about how something looks).
+
+1. Install Python 3 with Tk: Debian/Ubuntu `sudo apt install python3-tk`, Fedora `sudo dnf install python3-tkinter`, macOS `brew install python-tk` (or the python.org installer).
+2. `pip install meshcore-cli pyserial tkintermapview pillow`
+3. **Linux USB:** your user must be allowed to use serial ports: `sudo usermod -aG dialout $USER` (some distros: `uucp`), then log out and in again. Ports look like `/dev/ttyUSB0` or `/dev/ttyACM0`. **macOS USB:** ports look like `/dev/cu.usbserial-…`.
+4. Start it with `./Run_GUI.sh` (Linux) or double-click `Run_GUI.command` (macOS; the first time: `chmod +x Run_GUI.command Run_GUI.sh`), or run `python3 mcIRC.py`. Try `python3 mcIRC.py --demo` first.
+
+Known differences: macOS ignores button colours (the "red when unread" switchbar buttons are less obvious there, the tree still turns red), right-click is Control-click on a one-button mouse, and notification sounds use `afplay` (macOS) or `canberra-gtk-play` / `paplay` (Linux). Bluetooth works through `bleak` but is untested on both.
+
+## Quick start (Windows)
 
 1. Clone this repo (or download it) into its own folder
 2. `pip install meshcore-cli pyserial tkintermapview`
@@ -57,7 +68,7 @@ Optional addons add features - for example **BC traffic bot** turns mcIRC into a
 - **Slash commands** - type `/` and the matching commands pop up above the input line as you type. In a private window with a **repeater or room server**, the MeshCore CLI commands (`/reboot`, `/ver`, `/neighbors`, `/get radio`, `/clock sync`, `/stats-core`, ... about 40 of them, with `/login <admin password>` when needed) are sent to that node; elsewhere the same names and every meshcli command (`/contacts`, `/advert`, `/get name`, ...) run on your own node. `/meshcli <anything>` runs any meshcli command. Dangerous ones (reboot, erase, power off) ask first.
 - **@mentions, themes and sounds** - `@nickname` and `@[nick name]` are highlighted in messages (stronger when it is your name), plus your own highlight words. Five colour themes (Classic mIRC, Night, Terminal, Ocean, Paper) and notification sounds for private messages, mentions and highlight words (Options > Display / Sounds).
 - **Right-click menus** - on channels in the window tree, on the private-message buttons (people, repeaters, room servers) and on names in the nick list: node info, show on map, log in / status / reboot for repeaters, mark as read, clear, open log, close.
-- **Troubleshooting log and bug reports** - each run writes a log to `diagnostics/` (the last 5 runs are kept): versions, USB serial ports, connection steps, which meshcli commands worked or failed, your node's firmware and radio settings, and errors. It never contains message text (public or private), passwords, your position, whole public keys or full Bluetooth/IP addresses. **Help > Report a bug...** (or `/bug`) lets you describe the problem, shows exactly what would be attached, then opens a pre-filled GitHub issue (the complete report is copied to the clipboard; you can also save it as a file). It is how problems with boards the maintainers don't own get fixed.
+- **Troubleshooting log and bug reports** (optional screenshot included: it hides chat text, names and the button bar unless you untick that) - each run writes a log to `diagnostics/` (the last 5 runs are kept): versions, USB serial ports, connection steps, which meshcli commands worked or failed, your node's firmware and radio settings, and errors. It never contains message text (public or private), passwords, your position, whole public keys or full Bluetooth/IP addresses. **Help > Report a bug...** (or `/bug`) lets you describe the problem, shows exactly what would be attached, then opens a pre-filled GitHub issue (the complete report is copied to the clipboard; you can also save it as a file). It is how problems with boards the maintainers don't own get fixed.
 - **Logs** - every window is logged to its own text file in `logs/` (`#drivebc.txt`, `@Alice.txt`, ...), with session start/close lines like mIRC. After a restart the windows come back with their latest history (Options > Display).
 - **Map** - every node the radio has told us about, with toggles for repeaters / companions / room servers / sensors, nodes remembered but no longer on the radio, "seen within N days", names, your node, and any layer an addon adds. Real OpenStreetMap tiles need `pip install tkintermapview` (otherwise a plain plot is shown).
 - **Node memory** - a node only holds about 350 contacts. The GUI reads the radio's contact list every few minutes into `nodes.db` so the map and node list show more than the radio can, and forgets nodes that haven't been seen for N days (default 10; optionally also deletes them from the radio). Options > Nodes.

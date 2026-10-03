@@ -1,4 +1,5 @@
 """Right-click menus for the window tree, the private-message buttons and the nick list, plus closing / reopening windows."""
+import gui_platform
 import os
 import time
 import tkinter as tk
@@ -98,7 +99,7 @@ class MenusMixin:
 
     def _open_log(self, w):
         path = w.log.path if w.log else os.path.join(self.log_dir, file_name(w.name) + ".txt")
-        if os.path.exists(path): os.startfile(path)
+        if os.path.exists(path): gui_platform.open_path(path)
         else: messagebox.showinfo("Log", "This window has no log file yet.", parent=self.root)
 
     def _login_dialog(self, w):

@@ -3,7 +3,9 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
 
-UI_FONT = ("Tahoma", 8)
+import gui_platform
+
+UI_FONT = gui_platform.UI_FONT
 
 
 def apply_classic(root):
@@ -11,7 +13,7 @@ def apply_classic(root):
     root.option_add("*Font", UI_FONT)
     root.option_add("*Menu.font", UI_FONT)
     st = ttk.Style()
-    try: st.theme_use("winnative")
+    try: st.theme_use("winnative" if gui_platform.IS_WIN else "clam")
     except tk.TclError: st.theme_use("clam")
     st.configure(".", font=UI_FONT)
     st.configure("Treeview", rowheight=16, font=UI_FONT)
@@ -19,12 +21,11 @@ def apply_classic(root):
 
 
 def chat_font(size):
-    """mIRC's classic chat font is Fixedsys; use it when Windows has it, otherwise Courier New."""
-    try:
-        f = tkfont.Font(family="Fixedsys", size=size)
-        if f.actual("family").lower() == "fixedsys": return f
-    except tk.TclError: pass
-    return tkfont.Font(family="Courier New", size=size)
+    """mIRC's classic chat font is Fixedsys; use it when Windows has it, otherwise the best fixed-width font this system has."""
+    have = {x.lower() for x in tkfont.families()}
+    for fam in (["Fixedsys"] if gui_platform.IS_WIN else []) + [gui_platform.MONO_FONT_NAME, "DejaVu Sans Mono", "Liberation Mono", "Menlo", "Consolas", "Courier New", "Courier"]:
+        if fam.lower() in have: return tkfont.Font(family=fam, size=size)
+    return tkfont.Font(family="TkFixedFont", size=size)
 
 
 class Tooltip:

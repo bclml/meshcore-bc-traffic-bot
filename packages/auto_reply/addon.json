@@ -1,7 +1,7 @@
 {
   "name": "auto_reply",
   "title": "Auto reply",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Keyword rules: answer the words you choose on the channels you choose, with your own reply text, sent to the channels you pick. Comes with a 'test' rule.",
   "requires": [],
   "files": {

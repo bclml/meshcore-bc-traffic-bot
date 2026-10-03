@@ -6,10 +6,12 @@ import json, logging, os, re, subprocess, sys, threading, time
 
 import serial.tools.list_ports
 
+import gui_platform
+
 # When the GUI runs under pythonw (no console of its own), every meshcli.exe call would otherwise flash a console window.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 UTF8 = dict(encoding="utf-8", errors="replace", env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})   # meshcli must be able to print emoji/accents in replies (Windows console default can't)
-DEFAULT_CLI_PATH = os.path.join(os.path.dirname(sys.executable), "Scripts", "meshcli.exe")
+DEFAULT_CLI_PATH = gui_platform.meshcli_path()
 
 BLE_SCAN_TIMEOUT = 10  # seconds to wait while scanning for the node over Bluetooth
 
@@ -111,7 +113,8 @@ def usb_candidates():
     found = []
     for p in serial.tools.list_ports.comports():
         text = f"{p.description or ''} {p.manufacturer or ''}"
-        if "bluetooth" in text.lower(): continue
+        if "bluetooth" in text.lower() or "bluetooth" in p.device.lower(): continue
+        if gui_platform.IS_MAC and p.device.startswith("/dev/tty."): continue      # every Mac port appears twice (tty. and cu.); cu. is the one to use
         if p.vid in USB_VENDORS: score = 3
         elif p.vid and re.search(r"usb|uart|serial|acm", text, re.IGNORECASE): score = 1
         else: continue
@@ -137,6 +140,8 @@ def explain_failure(text):
     if "serial companion" in t or "no response from meshcore node" in t:
         return ("the device did not answer as a MeshCore Companion - it may be running Repeater / Room-server firmware (flash Companion firmware to chat), "
                 "be a different kind of device, or another program is using the port")
+    if not gui_platform.IS_WIN and ("permission denied" in t or "errno 13" in t):
+        return "the system does not let you use that serial port - " + gui_platform.permission_hint()
     if "access is denied" in t or "could not open port" in t or "permissionerror" in t or "being used by another" in t:
         return "the port is busy - close other programs that use it (serial monitor, the console agent, another meshcli)"
     if "not found" in t or "no such file" in t or "cannot find the file" in t:

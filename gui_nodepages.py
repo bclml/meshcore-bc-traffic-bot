@@ -1,4 +1,5 @@
 """Options pages for the USB node's own settings: radio, behaviour, and a status/actions page."""
+import gui_platform
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -35,7 +36,7 @@ class NodePages:
 
     def build(self, stage):
         a, b, c = (tk.Frame(stage, bg=BG) for _ in range(3))
-        tk.Label(a, text="This node: identity and radio", bg=BG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(a, text="This node: identity and radio", bg=BG, font=(gui_platform.DIALOG_FONT_NAME, 9, "bold")).pack(anchor="w")
         self._buttons(a)
         for label, key, vals in (("Node name:", "name", None), ("Latitude:", "lat", None), ("Longitude:", "lon", None),
                                  ("Frequency (MHz):", "freq", None), ("Bandwidth (kHz):", "bw", cfg.BW_CHOICES),
@@ -44,7 +45,7 @@ class NodePages:
             self._row(a, label, key, vals)
         tk.Label(a, text="Changing frequency / bandwidth / SF / CR needs a reboot; you'll be asked after writing. All stations on the mesh must use the same radio settings.",
                  bg=BG, fg="#555", justify="left", wraplength=440).pack(anchor="w", pady=4)
-        tk.Label(b, text="This node: behaviour", bg=BG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(b, text="This node: behaviour", bg=BG, font=(gui_platform.DIALOG_FONT_NAME, 9, "bold")).pack(anchor="w")
         self._buttons(b)
         tk.Checkbutton(b, text="Multi-acks (extra acknowledgements)", variable=self.v["multi_acks"], bg=BG).pack(anchor="w")
         tk.Checkbutton(b, text="Share my location in adverts", variable=self.v["loc_policy"], bg=BG).pack(anchor="w")
@@ -53,7 +54,7 @@ class NodePages:
             self._row(b, label, key, cfg.TELEMETRY)
         self._row(b, "Path hash mode (0-2):", "path_hash", ["0", "1", "2"])
         self._row(b, "BLE pin (0 = default):", "pin")
-        tk.Label(c, text="This node: status and actions", bg=BG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(c, text="This node: status and actions", bg=BG, font=(gui_platform.DIALOG_FONT_NAME, 9, "bold")).pack(anchor="w")
         self.status_lbl = tk.Label(c, bg="white", relief="sunken", justify="left", anchor="nw", wraplength=440, height=13, text="Not read yet.")
         self.status_lbl.pack(fill="x", pady=4)
         for row in ((("Refresh", self.read), ("Send advert", lambda: self.act("advert")), ("Send flood advert", lambda: self.act("floodadv"))),

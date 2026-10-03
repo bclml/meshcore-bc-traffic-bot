@@ -3,6 +3,7 @@
 Like an old mIRC toolbar it has a grip: drag the grip to the top, bottom, left or right edge of the window to dock it
 there, or drop it anywhere else to let it float as a little tool window.  Right-click the grip for a menu, double-click
 it to float/dock.  Right- or middle-click a button to close that conversation."""
+import gui_platform
 import tkinter as tk
 
 from gui_common import BG
@@ -88,7 +89,7 @@ class SwitchBar:
             w.bind("<ButtonPress-1>", self._drag_start)
             w.bind("<B1-Motion>", self._drag_move)
             w.bind("<ButtonRelease-1>", self._drag_end)
-            w.bind("<Button-3>", self._menu)
+            gui_platform.bind_right_click(w, self._menu)
             w.bind("<Double-Button-1>", lambda e: self.set_dock(self.last_dock if self.dock == "float" else "float"))
         self.buttons = {}
         if not self.items:
@@ -97,8 +98,8 @@ class SwitchBar:
             label = name.lstrip("@")
             b = tk.Button(self.host, text=label if len(label) <= 12 else label[:11] + "…", font=FONT, bg=BG, bd=1, padx=3, pady=0,
                           width=12 if vertical else 0, command=it["click"], takefocus=False)
-            b.bind("<Button-2>", lambda e, n=name: self.items[n]["close"]())      # middle click closes
-            b.bind("<Button-3>", lambda e, n=name: (self.items[n]["menu"](e.x_root, e.y_root) if self.items[n]["menu"] else self.items[n]["close"]()))
+            b.bind(gui_platform.MIDDLE_CLICK, lambda e, n=name: self.items[n]["close"]())      # middle click closes
+            gui_platform.bind_right_click(b, lambda e, n=name: (self.items[n]["menu"](e.x_root, e.y_root) if self.items[n]["menu"] else self.items[n]["close"]()))
             b.pack(side=side, fill="x" if vertical else "none", padx=1, pady=1)
             self.buttons[name] = b
         self._style()

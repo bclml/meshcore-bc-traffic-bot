@@ -1,4 +1,5 @@
 """Shared settings, theme constants and helpers for the mIRC-style GUI (see mcIRC.py)."""
+import gui_platform
 import json, os, re
 
 import meshcore_io as ea
@@ -30,7 +31,7 @@ DEFAULT_SETTINGS = {
 # Classic Windows / mIRC palette
 BG = "#d4d0c8"
 TEXT_BG = "#ffffff"
-FONT_FAMILY = "Courier New"
+FONT_FAMILY = gui_platform.MONO_FONT_NAME
 NICK_COLORS = ["#0000cc", "#009300", "#cc0000", "#7f007f", "#fc7f00", "#009393", "#7f0000", "#00007f", "#4b4b4b"]
 
 # Display name -> (topic shown in the topic bar, purpose shown in the channel list)

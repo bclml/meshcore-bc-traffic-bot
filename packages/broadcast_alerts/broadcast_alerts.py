@@ -1,6 +1,7 @@
 """BC traffic bot addon: DriveBC, BC Ferries, BC Transit, TransLink, weather, earthquake and tsunami feeds
 broadcast to the mesh, plus the weekly reminder.  Has a master mute and a switch per source.
 The chat GUI works fine with this addon disabled (Tools > Addons)."""
+import gui_platform
 import asyncio, logging, os, threading
 import tkinter as tk
 from tkinter import ttk
@@ -13,7 +14,7 @@ class Addon(AddonBase):
     # (The "test" auto-reply is its own addon now: Auto reply.)
     SOURCES = [k for k in ea.TX_SOURCES if k != "Test reply"]   # alert types with a switch on the Alerts tab
     title = "BC traffic bot"
-    version = "1.1"
+    version = "1.1.1"
     author = "built in"
     description = "Traffic / ferry / transit / weather / earthquake / tsunami alerts, with mute and per-source switches."
 
@@ -108,7 +109,7 @@ class Addon(AddonBase):
         saved = g("sources", {})
         self.src = {k: tk.BooleanVar(value=saved.get(k, True)) for k in self.SOURCES}
         bg = parent["bg"]
-        tk.Label(f, text="BC traffic bot", bg=bg, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Label(f, text="BC traffic bot", bg=bg, font=(gui_platform.DIALOG_FONT_NAME, 9, "bold")).pack(anchor="w")
         nb = ttk.Notebook(f)
         nb.pack(fill="both", expand=True, pady=4)
         alerts, accounts = (tk.Frame(nb, bg=bg, padx=8, pady=6) for _ in range(2))

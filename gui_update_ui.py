@@ -1,4 +1,5 @@
 """Dialogs for updating the app and browsing/installing tested addons, plus the feedback links in the Help menu."""
+import gui_platform
 import subprocess, sys, tkinter as tk, webbrowser
 from tkinter import ttk, messagebox
 
@@ -24,7 +25,7 @@ class UpdateDialog(tk.Toplevel):
         self.title("Check for updates")
         self.geometry("560x340")
         self.transient(app.root)
-        self.head = tk.Label(self, bg=BG, font=("Segoe UI", 10, "bold"), anchor="w", justify="left")
+        self.head = tk.Label(self, bg=BG, font=(gui_platform.DIALOG_FONT_NAME, 10, "bold"), anchor="w", justify="left")
         self.head.pack(fill="x", padx=10, pady=(10, 2))
         tk.Label(self, bg=BG, fg="#555", anchor="w", justify="left", wraplength=530,
                  text="Updating keeps your settings, installed addons, logs and node memory. Every file that is replaced is backed up first, "

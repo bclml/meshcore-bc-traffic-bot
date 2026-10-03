@@ -9,7 +9,7 @@ import gui_platform
 from gui_common import BG
 
 PAYPAL_ME = "https://www.paypal.me/7787266445"    # the project's PayPal.Me page (PayPal shows the name "MCL Services")
-SUBSCRIBE_URL = "https://www.paypal.com/ncp/payment/TVFX47SD92LSE"      # PayPal "$1 CAD / month" subscription; the monthly button is hidden if this is empty
+SUBSCRIBE_URL = ""      # a PayPal *subscription* link ($1 CAD / month); the monthly button stays hidden while this is empty. (A "payment link" is only a one-time payment.)
 CURRENCY = "CAD"
 
 TEXT = ("mcIRC is free and stays free. Every feature works exactly the same whether or not you donate - "

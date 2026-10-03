@@ -30,6 +30,7 @@ import gui_health
 import gui_platform
 from gui_adverts import AdvertWatcher
 from gui_report import BugReportDialog
+from gui_donate import DonateDialog
 from gui_switchbar import SwitchBar
 from gui_update_ui import UpdateDialog, CatalogDialog, LINKS, open_link
 import gui_themes
@@ -278,6 +279,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         for label in LINKS:
             if label not in ("Project page on GitHub...", "Report a bug..."): h.add_command(label=label, command=lambda l=label: open_link(l))
         h.add_separator()
+        h.add_command(label="Support mcIRC (optional donation)...", command=lambda: DonateDialog(self))
         h.add_command(label="Project page on GitHub...", command=lambda: open_link("Project page on GitHub..."))
         h.add_command(label=f"About (version {gui_platform.version_text(gui_update.local_version())})", command=lambda: show_about(self.root))
         win = tk.Menu(m, tearoff=0)
@@ -301,7 +303,8 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         bar.pack(fill="x")
         for item in (("connect", "Connect to the node", self.connect), ("disconnect", "Disconnect", self.disconnect), None,
                      ("channels", "Channels list", lambda: ChannelListDialog(self)), ("nodes", "Node list", self.open_node_list), ("map", "Map", self.open_map), None,
-                     ("addons", "Addons", self.open_addons), ("options", "Options", self.open_options), None):
+                     ("addons", "Addons", self.open_addons), ("options", "Options", self.open_options), None,
+                     ("donate", "Support mcIRC - optional donation", lambda: DonateDialog(self))):
             if item is None:
                 tk.Frame(bar, width=2, bd=1, relief="sunken", bg=BG).pack(side="left", fill="y", padx=4, pady=2)
                 continue
@@ -741,6 +744,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
             return self.status_line("*** /rpt <text> sends raw text to the repeater of the current private window.", "warn")
         if self.try_remote_command(cmd, arg): return          # in a repeater / room-server window, CLI commands go to that node
         if cmd in ("bug", "report"): return BugReportDialog(self)
+        if cmd in ("donate", "support"): return DonateDialog(self)
         simple = {"list": lambda: ChannelListDialog(self), "map": self.open_map, "nodes": self.open_node_list, "addons": self.open_addons,
                   "options": self.open_options, "connect": self.connect, "disconnect": self.disconnect, "quit": self.quit}
         if cmd == "help":

@@ -111,4 +111,10 @@ def make_icons(master):
     _disc(im, 8, 8, 5, "#808080"); _disc(im, 8, 8, 2, "#d4d0c8")
     im = new("addons")                                   # a puzzle-ish block
     _rect(im, 2, 5, 12, 14, "#6a1b9a"); _rect(im, 3, 6, 11, 13, "#ab47bc"); _rect(im, 5, 2, 9, 5, "#6a1b9a"); _rect(im, 6, 3, 8, 5, "#ab47bc")
+    im = new("donate")                                   # a red heart
+    for cx, cy in ((5, 5), (10, 5)): _disc(im, cx, cy, 3, "#c62828")
+    for y in range(6, 14):
+        w = 7 - (y - 6)
+        _rect(im, 8 - w, y, 7 + w, y, "#c62828")
+    _px(im, 4, 4, "#ef9a9a"); _px(im, 5, 4, "#ef9a9a"); _px(im, 4, 5, "#ef9a9a")
     return icons

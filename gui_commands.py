@@ -79,9 +79,12 @@ LOCAL_PARAMS = [("name", "<name>"), ("radio", "<freq,bw,sf,cr>"), ("tx", "<dbm>"
 EXCLUSIVE = {c[0] for c in APP if c[0] not in ("clear",)}     # these always mean the mcIRC command, never a repeater command
 
 
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[()][A-B0-2]")
+
+
 def _clean(res):
-    """meshcli output without its INFO log lines."""
-    lines = f"{res.stdout}\n{res.stderr}".splitlines()
+    """meshcli output without its INFO log lines and colour codes."""
+    lines = ANSI.sub("", f"{res.stdout}\n{res.stderr}").splitlines()
     return [l.rstrip() for l in lines if l.strip() and not re.match(r"^(INFO|DEBUG|WARNING):meshcore", l)]
 
 

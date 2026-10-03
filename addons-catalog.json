@@ -5,11 +5,11 @@
     {
       "name": "broadcast_alerts",
       "title": "BC traffic bot",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "author": "bclml",
-      "description": "DriveBC, BC Ferries, BC Transit, TransLink, weather, earthquake and tsunami alerts broadcast to the mesh, with a master mute and a switch per alert type.",
+      "description": "DriveBC, BC Ferries, BC Transit, TransLink, weather, earthquake and tsunami alerts. Keeps the map layers up to date; broadcasting them to the mesh is off until you switch it on (a switch per alert type).",
       "path": "packages/broadcast_alerts",
-      "tested": "2026-10-03 with app 1.4.5"
+      "tested": "2026-10-03 with app 1.4.6"
     },
     {
       "name": "auto_reply",
@@ -18,7 +18,7 @@
       "author": "bclml",
       "description": "Keyword rules: answer the words you choose on the channels you choose, with your own reply text, sent to the channels you pick. Comes with a 'test' rule.",
       "path": "packages/auto_reply",
-      "tested": "2026-10-03 with app 1.4.5"
+      "tested": "2026-10-03 with app 1.4.6"
     }
   ]
 }

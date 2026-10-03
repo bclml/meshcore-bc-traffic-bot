@@ -62,7 +62,7 @@ class MapWindow(tk.Toplevel):
         ttk.Button(side, text="Node list...", command=app.open_node_list).pack(fill="x", pady=2)
         self.stats = tk.Label(side, bg=BG, justify="left", anchor="nw", wraplength=200)
         self.stats.pack(fill="x", pady=6)
-        self.info = tk.Label(side, bg="white", relief="sunken", justify="left", anchor="nw", wraplength=200, height=6, text="Click a marker for details.")
+        self.info = tk.Label(side, bg="white", relief="sunken", justify="left", anchor="nw", wraplength=200, height=11, text="Click a marker for details.")
         self.info.pack(fill="x", side="bottom")
         if tkintermapview:
             self.map = tkintermapview.TkinterMapView(self, corner_radius=0)
@@ -113,7 +113,9 @@ class MapWindow(tk.Toplevel):
             if not self.layer_vars.get(name, tk.BooleanVar(value=True)).get(): continue
             try: items = provider()
             except Exception: items = []
-            for lat, lon, label in items: pts.append((lat, lon, safe_text(label)[:30], color, color, safe_text(label)))
+            for item in items:        # (lat, lon, label) or (lat, lon, label, details): details fill the info box when you click the pin
+                lat, lon, label = item[:3]
+                pts.append((lat, lon, safe_text(label)[:40], color, color, safe_text(item[3] if len(item) > 3 else label)))
         st = self.app.nodes.stats()
         self.stats.config(text=f"{shown} node(s) shown\n{st['total']} remembered, {st['on_radio']} on the radio\n{st['positioned']} with a position")
         return pts

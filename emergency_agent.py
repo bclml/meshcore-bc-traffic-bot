@@ -18,6 +18,7 @@ except ImportError:
     GTFS_RT_AVAILABLE = False
 
 ALERT_LOCATIONS = {}  # "<source>|<guid>" -> (lat, lon, label) for alerts that carry coordinates (DriveBC); shown on the GUI map
+ALERT_MAPINFO = {}    # "<source>|<guid>" -> (short map label, multi-line details) for the same alerts: what the map shows when you click the pin
 EARTHQUAKE_EVENTS = []  # recent BC-relevant quakes as (lat, lon, magnitude, place) for the GUI map
 
 # Broadcast switches (driven by the GUI's "BC traffic bot" addon; the console agent leaves everything on).
@@ -238,6 +239,25 @@ def check_regions_match(text, is_transit=False):
     if not region_passed: return False
     if is_transit: return any(k in txt for k in TRANSIT_KEYWORDS)
     return True
+
+def _drivebc_mapinfo(ev, headline, city, named_roads):
+    """What the map shows for a DriveBC incident: a short label and the full details.  (The text that is broadcast is built elsewhere and unchanged.)
+    Events on "Other Roads" (not a numbered highway) get DriveBC's town-level point, which can be kilometres from the real road, so say so."""
+    roads = ev.get("roads") or []
+    r0 = roads[0] if roads else {}
+    road = (named_roads[0].get("name", "") if named_roads else "").strip() or (r0.get("from") or "").strip()
+    where = f"{headline}" + (f" - {road}" if road and road.lower() not in headline.lower() else "") + (f" ({city})" if city else "")
+    desc = clean_html_tags(ev.get("description") or "")
+    desc = re.sub(r"\s*Last update:.*?Next update:[^.]*\.", "", desc, flags=re.IGNORECASE | re.DOTALL)      # DriveBC's scheduling footer
+    desc = re.sub(r"\s*Last update:[^.]*\.", "", desc, flags=re.IGNORECASE).strip()
+    state = (r0.get("state") or "").replace("_", " ").lower()
+    meta = ", ".join(x for x in ((ev.get("severity") or "").title(), state) if x)
+    upd = (ev.get("updated") or "")[:16].replace("T", " ")
+    lines = [where, meta + (f" - DriveBC updated {upd}" if upd else ""), desc]
+    if not named_roads and city:
+        lines.append(f"Location approximate: DriveBC only places this event near {city}; the road itself may be elsewhere.")
+    return where, "\n".join(l for l in lines if l.strip(" -"))
+
 
 def clean_html_tags(raw_html):
     if not raw_html: return ""
@@ -524,7 +544,7 @@ def broadcast_via_cli(source, title, description, is_clear=False, forced_region=
         body = body[:budget - 1].rstrip() + "…"
     msg = header + body
     guid_tag = f" {{id:{guid}}}" if guid else ""
-    chan_idx = _resolve_channel_idx(source)
+    chan_idx = _resolve_channel_idx(source) if (io.CHANNEL_INDEX_BY_NAME or not TX["muted"]) else None      # map-only mode without a radio: stay quiet
     if not tx_allowed(_tx_kind(source)):
         # Same "Broadcasting ... to Channel Index N:" wording as a real send (prefixed so it's obvious in the
         # log) so reload_active_alerts_from_log() still sees this alert as already announced after a restart.
@@ -961,6 +981,7 @@ async def scrape_traffic_feeds():
                         geo = ev.get("geography") or {}
                         if geo.get("type") == "Point" and len(geo.get("coordinates") or []) >= 2:
                             ALERT_LOCATIONS[f"DriveBC|{g_txt}"] = (geo["coordinates"][1], geo["coordinates"][0], t_txt)
+                            ALERT_MAPINFO[f"DriveBC|{g_txt}"] = _drivebc_mapinfo(ev, headline, city, named_roads)
                         cur[g_txt] = ("DriveBC", t_txt, d_txt)
             else:
                 skip_clear_sources.add("DriveBC")
@@ -1247,7 +1268,7 @@ async def traffic_loop():
         # reconfigured mid-run and lost its channel list), keep retrying once a minute instead of
         # requiring a manual restart to notice — see resolve_channel_indices docstring for the
         # incident (5+ days of alerts silently going to Public) this is fixing.
-        if not io.CHANNEL_INDEX_BY_NAME:
+        if not io.CHANNEL_INDEX_BY_NAME and not TX["muted"] and io.CONNECTION_ARGS:
             resolve_channel_indices()
         await check_tsunami_warnings()  # checked every minute, not on the slower 10-min weather cycle — a tsunami warning is too time-critical to wait on
         await check_earthquake_warnings()  # same cadence/urgency as tsunami — see broadcast_critical_all_channels

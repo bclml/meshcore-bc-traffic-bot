@@ -15,6 +15,7 @@ Thanks for helping! Everyone is welcome - you don't need to write code.
 
 Addons are the easiest way to add a feature without touching the core. Read [docs/ADDONS.md](docs/ADDONS.md). In short:
 write it, run `python packages/check_package.py packages/<name>`, then open an *Addon submission* issue or a pull request.
+Using an AI assistant (Claude, ChatGPT/Codex, Gemini, Copilot, Cursor...)? Point it at this repo: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and `.github/copilot-instructions.md` send it to [docs/AI_ADDON_GUIDE.md](docs/AI_ADDON_GUIDE.md), which explains how to write, test and submit an addon.
 Submitted addons are reviewed and tested by a maintainer; tested ones are added to `addons-catalog.json`, which is the list
 people choose from and download inside the app.
 

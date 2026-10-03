@@ -12,10 +12,18 @@ Optional addons add features - for example **BC traffic bot** turns mcIRC into a
 
 ![mcIRC channel window](docs/images/chat.png)
 
-**Direct messages** - private `@name` windows with a switchbar of small buttons that turn red when unread. Drag the grip to dock the bar at the top, bottom or either side, or let it float.
+**Direct messages** - private `@name` windows with a switchbar of small buttons that turn red when unread. People, repeaters and room servers appear only on this bar (repeaters blue, room servers purple); the window tree on the left holds just Status and the channels. Drag the grip to dock the bar at the top, bottom or either side, or let it float.
 
 ![mcIRC direct messages](docs/images/direct-messages.png)
 ![mcIRC switchbar docked on the left](docs/images/switchbar-docked.png)
+
+**Slash commands** - the command list pops up as you type `/`, and a repeater's private window accepts the MeshCore CLI.
+
+![mcIRC command list](docs/images/commands.png)
+
+**Themes and @mentions** - mentions and highlight words stand out; five colour themes.
+
+![mcIRC Night theme with mentions](docs/images/theme-night.png)
 
 **Map** - every node your radio has ever heard (more than its 350-contact limit), with toggles for node types, age and addon layers.
 
@@ -46,6 +54,9 @@ Optional addons add features - for example **BC traffic bot** turns mcIRC into a
 `Run_GUI.bat` (or `python mcIRC.py`) opens a desktop client for your node - no console window stays open. Try it without a radio: `python mcIRC.py --demo`. Use either the GUI **or** `Run_Agent.bat`: only one program can hold the node's COM port.
 
 - **Chat** - a treebar of channels, per-channel windows with topic bar and nick list, a status window and an input line (`/help` lists commands). **Direct messages** open as `@name` windows (double-click a name, `/query`, `/msg`, or double-click a node in the node list). A **switchbar** of square buttons along the top has one per window and turns red when a window has unread messages.
+- **Slash commands** - type `/` and the matching commands pop up above the input line as you type. In a private window with a **repeater or room server**, the MeshCore CLI commands (`/reboot`, `/ver`, `/neighbors`, `/get radio`, `/clock sync`, `/stats-core`, ... about 40 of them, with `/login <admin password>` when needed) are sent to that node; elsewhere the same names and every meshcli command (`/contacts`, `/advert`, `/get name`, ...) run on your own node. `/meshcli <anything>` runs any meshcli command. Dangerous ones (reboot, erase, power off) ask first.
+- **@mentions, themes and sounds** - `@nickname` and `@[nick name]` are highlighted in messages (stronger when it is your name), plus your own highlight words. Five colour themes (Classic mIRC, Night, Terminal, Ocean, Paper) and notification sounds for private messages, mentions and highlight words (Options > Display / Sounds).
+- **Right-click menus** - on channels in the window tree, on the private-message buttons (people, repeaters, room servers) and on names in the nick list: node info, show on map, log in / status / reboot for repeaters, mark as read, clear, open log, close.
 - **Logs** - every window is logged to its own text file in `logs/` (`#drivebc.txt`, `@Alice.txt`, ...), with session start/close lines like mIRC. After a restart the windows come back with their latest history (Options > Display).
 - **Map** - every node the radio has told us about, with toggles for repeaters / companions / room servers / sensors, nodes remembered but no longer on the radio, "seen within N days", names, your node, and any layer an addon adds. Real OpenStreetMap tiles need `pip install tkintermapview` (otherwise a plain plot is shown).
 - **Node memory** - a node only holds about 350 contacts. The GUI reads the radio's contact list every few minutes into `nodes.db` so the map and node list show more than the radio can, and forgets nodes that haven't been seen for N days (default 10; optionally also deletes them from the radio). Options > Nodes.

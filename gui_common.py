@@ -17,6 +17,9 @@ DEFAULT_SETTINGS = {
     "show_time": True, "font_size": 10, "auto_connect": False,
     "check_updates": True,       # look for a newer version at startup (at most once a day)
     "last_update_check": 0,
+    "theme": "Classic mIRC", "highlight_words": "",
+    "sounds_enabled": True, "sound_private": "Ding", "sound_mention": "Exclamation", "sound_highlight": "Question",
+    "sound_channel": "None", "sound_custom": "", "closed_channels": [],
     "log_enabled": True,         # keep one .txt log per window in logs/
     "log_history": 200,          # how many log lines to show again after a restart
     "addons": {}, "addons_enabled": {},

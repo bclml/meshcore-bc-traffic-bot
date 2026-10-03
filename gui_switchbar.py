@@ -24,9 +24,16 @@ class SwitchBar:
         self.build()
 
     # ---- content -----------------------------------------------------------------------------------------------
-    def add(self, name, click, close):
-        self.items[name] = {"state": "", "current": False, "click": click, "close": close}
+    KIND_FG = {2: "#1565c0", 3: "#6a1b9a"}     # repeaters blue, room servers purple; people black
+
+    def add(self, name, click, close, menu=None, kind=0):
+        self.items[name] = {"state": "", "current": False, "click": click, "close": close, "menu": menu, "kind": kind}
         self.build()
+
+    def set_kind(self, name, kind):
+        if name in self.items and self.items[name]["kind"] != kind:
+            self.items[name]["kind"] = kind
+            self._style()
 
     def remove(self, name):
         self.items.pop(name, None)
@@ -45,7 +52,7 @@ class SwitchBar:
             if it["current"]: b.config(relief="sunken", bg=BG, fg="black", activebackground=BG)
             elif it["state"] == "msg": b.config(relief="raised", bg="#ff2020", fg="white", activebackground="#ff5050")
             elif it["state"] == "event": b.config(relief="raised", bg=BG, fg="#0000cc", activebackground=BG)
-            else: b.config(relief="raised", bg=BG, fg="black", activebackground=BG)
+            else: b.config(relief="raised", bg=BG, fg=self.KIND_FG.get(it["kind"], "black"), activebackground=BG)
 
     # ---- (re)building the host ---------------------------------------------------------------------------------
     def build(self):
@@ -90,7 +97,8 @@ class SwitchBar:
             label = name.lstrip("@")
             b = tk.Button(self.host, text=label if len(label) <= 12 else label[:11] + "…", font=FONT, bg=BG, bd=1, padx=3, pady=0,
                           width=12 if vertical else 0, command=it["click"], takefocus=False)
-            for ev in ("<Button-3>", "<Button-2>"): b.bind(ev, lambda e, n=name: self.items[n]["close"]())
+            b.bind("<Button-2>", lambda e, n=name: self.items[n]["close"]())      # middle click closes
+            b.bind("<Button-3>", lambda e, n=name: (self.items[n]["menu"](e.x_root, e.y_root) if self.items[n]["menu"] else self.items[n]["close"]()))
             b.pack(side=side, fill="x" if vertical else "none", padx=1, pady=1)
             self.buttons[name] = b
         self._style()

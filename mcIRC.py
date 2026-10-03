@@ -17,22 +17,60 @@ from gui_dialogs import OptionsDialog, ChannelListDialog, AddonsDialog, NodeList
 from gui_map import MapWindow
 from gui_nodes import NodeStore, sync as sync_nodes
 import gui_nodecfg
+import gui_nodes
 from gui_logs import WindowLog, LOG_DIR, logged_windows
 import gui_update
 import gui_style
 from gui_switchbar import SwitchBar
 from gui_update_ui import UpdateDialog, CatalogDialog, LINKS, open_link
+import gui_themes
+import gui_sounds
+from gui_private import PrivateMixin
+from gui_menus import MenusMixin
+from gui_commands import CommandsMixin, CommandPopup
 
 HELP = ["Commands:", "  /help            this list", "  /list            channel list", "  /map             open the map",
         "  /nodes           node list", "  /addons          addon manager", "  /options         open Options",
         "  /connect         connect to the node", "  /disconnect      disconnect", "  /freq <MHz>      change the radio frequency (node reboots)",
         "  /clear           clear this window", "  /join <#name>    switch to a channel window", "  /query <name>    open a private window with a node",
         "  /msg <name> <text>  send a direct message", "  /close           close this private window", "  /quit            exit",
-        "Type text in a channel window to send it to that channel (max ~120 characters)."]
+        "Type text in a channel window to send it to that channel (max ~120 characters).",
+        "Type / to see every command as you type. In a private window with a repeater or room server, MeshCore CLI commands",
+        "(/reboot, /ver, /get radio, /neighbors, ...) are sent to that node - use /login <admin password> first if it needs one.",
+        "Elsewhere the same names, plus all meshcli commands (/contacts, /advert, ...), run on your own node. /meshcli <command> runs anything."]
+
+
+MENTION = re.compile(r"@\[([^\]]+)\]|@([^\s,:;!?()\[\]]+)")
+def _plain(s): return re.sub(r"\W", "", s.lower())
+
+
+def split_mentions(text, base_tag, my_name, words=()):
+    """Cut a message into (text, tag) parts so "@nickname" / "@[nick name]" stand out, in a stronger colour when it is YOUR name, and highlight
+    words are underlined.  Returns (parts, mentions_me, hit_highlight_word)."""
+    parts, pos, me, word = [], 0, False, False
+    hl = re.compile(r"(?<!\w)(" + "|".join(re.escape(w) for w in words) + r")(?!\w)", re.IGNORECASE) if words else None
+    def plain(seg, tag):
+        nonlocal word
+        if not seg: return
+        if hl is None: return parts.append((seg, tag))
+        i = 0
+        for m in hl.finditer(seg):
+            if m.start() > i: parts.append((seg[i:m.start()], tag))
+            parts.append((m.group(0), "highlight"))
+            word, i = True, m.end()
+        if i < len(seg): parts.append((seg[i:], tag))
+    for m in MENTION.finditer(text):
+        plain(text[pos:m.start()], base_tag)
+        mine = bool(my_name) and _plain(m.group(1) or m.group(2) or "") == _plain(my_name)
+        me = me or mine
+        parts.append((m.group(0), "mention_me" if mine else "mention"))
+        pos = m.end()
+    plain(text[pos:], base_tag)
+    return parts, me, word
 
 
 class ChatWindow:
-    def __init__(self, parent, name, topic, font, log=None, history=0):
+    def __init__(self, parent, name, topic, font, log=None, history=0, theme=None):
         self.name, self.topic, self.nicks, self.unread, self.key, self.log = name, topic, set(), "", None, log
         self.frame = tk.Frame(parent, bg=TEXT_BG)
         self.text = tk.Text(self.frame, wrap="word", state="disabled", bg=TEXT_BG, fg="black", font=font,
@@ -41,14 +79,8 @@ class ChatWindow:
         self.text.config(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.text.pack(side="left", fill="both", expand=True)
+        gui_themes.style_text(self.text, theme or gui_themes.get(None), font)
         t = self.text
-        for tag, fg in (("ts", "#808080"), ("text", "black"), ("info", "#0000cc"), ("warn", "#cc6600"), ("error", "#cc0000"),
-                        ("new", "#cc0000"), ("clear", "#008000"), ("self", "#7f007f"), ("meta", "#808080")):
-            t.tag_config(tag, foreground=fg)
-        t.tag_config("critical", foreground="white", background="#cc0000")
-        t.tag_config("bot", foreground="#008000", font=(font.cget("family"), font.cget("size"), "bold"))
-        for i, c in enumerate(NICK_COLORS): t.tag_config(f"nick{i}", foreground=c)
-        t.tag_config("hist", foreground="#606060")
         if log:
             old = log.tail(history)   # earlier sessions, shown in grey
             if old:
@@ -67,6 +99,8 @@ class ChatWindow:
         t.config(state="disabled")
         if at_bottom: t.see("end")
         if self.log: self.log.append("".join(text for text, _ in parts))
+
+    def apply_theme(self, theme, font): gui_themes.style_text(self.text, theme, font)
 
     def clear(self):
         self.text.config(state="normal")
@@ -134,7 +168,7 @@ class QueueLogHandler(logging.Handler):
         if "[DIAGNOSTIC]" not in msg: self.q.put(("log", record.levelno, msg))
 
 
-class App:
+class App(PrivateMixin, MenusMixin, CommandsMixin):
     def __init__(self, root, demo=False):
         self.root, self.demo, self.connected = root, demo, False
         self.settings = load_settings()
@@ -143,12 +177,14 @@ class App:
         self.windows, self.current, self.history, self.hist_pos = {}, None, [], 0
         self.log_dir = tempfile.mkdtemp(prefix="meshlogs_") if demo else LOG_DIR   # demo mode must never touch the real logs
         self.commands, self.map_layers = {}, {}   # filled by addons
+        self._name_lookups = {}                   # key prefix -> time of the last radio lookup (rate limit)
         self.worker = CoreWorker(self)
         self.nodes = NodeStore(":memory:") if demo else NodeStore()
         self.addons = AddonManager(self)
         if demo: self.settings["addons"], self.settings["addons_enabled"] = {}, {n: True for n in self.addons.discover()}
         gui_style.apply_classic(root)   # old-mIRC chrome: must run before any widget exists
         self.font = gui_style.chat_font(self.settings["font_size"])
+        self.theme = gui_themes.get(self.settings.get("theme"))
         self.map_win = self.addons_win = None
         root.title("mcIRC")
         root.geometry("1000x640")
@@ -158,12 +194,13 @@ class App:
         self._status_bar()
         self._body()
         self.switchbar = SwitchBar(self)
+        gui_themes.style_panes(self, self.theme)
         self.status = self.add_window("Status", "status window", in_tree=False)
         self.tree.insert("", 0, iid="Status", text="Status")
         self.tree.insert("", "end", iid="Channels", text="Channels", open=True)
         self.add_window("Public", CHANNELS["Public"])
         for name in logged_windows(self.log_dir):   # windows from earlier sessions come back with their history
-            if name not in self.windows:
+            if name not in self.windows and name not in self.settings.get("closed_channels", []):
                 self.add_window(name, f"Private conversation with {name[1:]}" if name.startswith("@") else CHANNELS.get(name, "(restored from log)"))
         self.apply_settings()
         ea.GUI_CALLBACK = lambda kind, idx, text, nick, **extra: self.q.put(("chat", kind, idx, text, nick, extra))
@@ -172,6 +209,7 @@ class App:
         self.select_window("Status")
         self.status_line("*** Welcome. Type /help for commands, or press Connect.", "info")
         self.addons.load_all()
+        self.resolve_key_windows()
         root.after(100, self.drain)
         if not demo and self.settings["check_updates"]: root.after(8000, self.auto_update_check)
         root.after(1000, self.tick)
@@ -220,7 +258,7 @@ class App:
             menu.add_radiobutton(label=name, variable=self._winvar, value=name, command=lambda n=name: self.select_window(n))
         menu.add_separator()
         private = bool(self.current and self.current.name.startswith("@"))
-        menu.add_command(label="Close private window", state="normal" if private else "disabled", command=lambda: self.close_window(self.current.name))
+        menu.add_command(label="Close window", state="disabled" if self.current is self.status else "normal", command=lambda: self.close_window(self.current.name))
         menu.add_command(label="Clear window", command=lambda: self.current and self.current.clear())
 
     def _toolbar(self):
@@ -265,16 +303,14 @@ class App:
         self.entry.pack(side="left", fill="x", expand=True)
         self.counter = tk.Label(entry_row, bg=BG, width=8, text="0/120")
         self.counter.pack(side="right")
-        self.entry.bind("<Return>", self.on_enter)
-        self.entry.bind("<Up>", lambda e: self.recall(-1))
-        self.entry.bind("<Down>", lambda e: self.recall(1))
-        self.entry.bind("<KeyRelease>", lambda e: self.counter.config(text=f"{len(self.entry.get())}/{ea.MESH_MSG_MAX_CHARS}",
-                                                                      fg="red" if len(self.entry.get()) > ea.MESH_MSG_MAX_CHARS else "black"))
+        self.cmd_popup = CommandPopup(self, right, entry_row, self.entry)   # also binds Return / Up / Down / Tab / Esc and the key counter
         mid = tk.Frame(right, bg=BG)
         mid.pack(fill="both", expand=True)
         self.nicklist = tk.Listbox(mid, width=16, font=self.font, bg="white", relief="sunken", bd=2, activestyle="none", exportselection=False)
         self.nicklist.pack(side="right", fill="y")
         self.nicklist.bind("<Double-Button-1>", self.nick_dblclick)
+        self.nicklist.bind("<Button-3>", self._nick_menu)
+        self.tree.bind("<Button-3>", self._tree_menu)
         self.stack = tk.Frame(mid, bg=BG)
         self.stack.pack(side="left", fill="both", expand=True)
         self.stack.grid_rowconfigure(0, weight=1)
@@ -284,13 +320,11 @@ class App:
     def add_window(self, name, topic, in_tree=True):
         if name in self.windows: return self.windows[name]
         log = WindowLog(name, self.log_dir) if self.settings["log_enabled"] else None
-        w = ChatWindow(self.stack, name, topic, self.font, log, self.settings["log_history"])
+        w = ChatWindow(self.stack, name, topic, self.font, log, self.settings["log_history"], self.theme)
         w.frame.grid(row=0, column=0, sticky="nsew")
         self.windows[name] = w
-        if in_tree and hasattr(self, "tree"):
-            parent = "Queries" if name.startswith("@") else "Channels"
-            if parent == "Queries" and not self.tree.exists("Queries"): self.tree.insert("", "end", iid="Queries", text="Queries", open=True)
-            if self.tree.exists(parent): self.tree.insert(parent, "end", iid=name, text=name)
+        if in_tree and hasattr(self, "tree") and not name.startswith("@") and self.tree.exists("Channels"):   # the tree holds Status + channels only; people/repeaters/rooms live on the top bar
+            self.tree.insert("Channels", "end", iid=name, text=name)
         if name.startswith("@"): self._add_button(name)   # the switchbar is for direct messages only
         return w
 
@@ -304,6 +338,7 @@ class App:
         if self.tree.exists(name):
             self.tree.item(name, tags=())
             if self.tree.selection() != (name,): self.tree.selection_set(name)
+        elif self.tree.selection(): self.tree.selection_set(())      # private windows aren't in the tree: don't leave a stale highlight (or a pending select event) on a channel
         self.topic.config(state="normal")
         self.topic.delete(0, "end")
         self.topic.insert(0, safe_text(f"{name}: {w.topic}"))
@@ -330,55 +365,16 @@ class App:
     def buttons(self): return self.switchbar.buttons
 
     def _add_button(self, name):
-        self.switchbar.add(name, lambda n=name: self.select_window(n), lambda n=name: self.close_window(n))
+        row = self.node_row(self.windows.get(name))
+        self.switchbar.add(name, lambda n=name: self.select_window(n), lambda n=name: self.close_window(n),
+                           lambda x, y, n=name: self.show_window_menu(n, x, y), row["type"] if row else 0)
 
     def _style_buttons(self):
         if hasattr(self, "switchbar"): self.switchbar.sync(self.windows, self.current)
 
-    def close_window(self, name):
-        w = self.windows.get(name)
-        if w is None or not name.startswith("@"): return
-        if w.log: w.log.stamp("Session Close")
-        was_current = w is self.current
-        w.frame.destroy()
-        del self.windows[name]
-        if self.tree.exists(name): self.tree.delete(name)
-        self.switchbar.remove(name)
-        if was_current: self.select_window("Status")
 
-    # ---- private (direct message) windows ----
-    def open_query(self, name, key=None):
-        name = name.lstrip("@")
-        w = self.add_window("@" + name, f"Private conversation with {name}")
-        if key: w.key = key
-        self.select_window("@" + name)
-        return w
 
-    def _dm_in(self, text, prefix, extra):
-        node = self.nodes.find_by_prefix(prefix)
-        name = node["name"] if node else prefix[:8]
-        w = self.add_window("@" + name, f"Private conversation with {name}")
-        w.key = node["public_key"] if node else prefix
-        bits = []
-        if extra.get("snr") is not None: bits.append(f"SNR {extra['snr']}")
-        hops = extra.get("hops")
-        if hops is not None: bits.append("direct" if hops in (0, 255) else f"{hops} hops")
-        self.chat_line(w, name, text, "text", f"({', '.join(bits)})" if bits else "")
-        self.addons.dispatch("on_message", {"channel": w.name, "channel_idx": None, "nick": name, "text": text, "dm": True,
-                                             "snr": extra.get("snr"), "hops": hops, "raw": extra.get("raw")})
 
-    def send_dm(self, w, text):
-        key = w.key or (self.nodes.find_by_name(w.name[1:]) or {}).get("public_key")
-        if not self.connected or not key:
-            self.status_line(f"*** Can't message {w.name[1:]}: " + ("not connected." if not self.connected else "that node's key isn't known yet."), "error")
-            return
-        w.key = key
-        self.chat_line(w, self.settings["node_name"], text, "self")
-        def work():
-            res = ea.execute_mesh_command(ea.CONNECTION_ARGS + ["msg", key, text])
-            out = f"{res.stdout}\n{res.stderr}"
-            if re.search(r"unknown destination|\berror\b", out, re.IGNORECASE): raise RuntimeError(out.strip().splitlines()[-1])
-        self.bg(work, lambda r: isinstance(r, Exception) and self.status_line(f"*** Message to {w.name[1:]} failed: {r}", "error"))
 
     # ---- writing ------------------------------------------------------------------------------
     def stamp(self):
@@ -388,14 +384,21 @@ class App:
         self.status.write(self.stamp() + [(text, tag)])
         self.mark_unread(self.status, "event")
 
-    def chat_line(self, w, nick, text, tag, suffix=""):
-        nick_tag = "bot" if nick == self.settings["node_name"] else f"nick{sum(map(ord, nick)) % len(NICK_COLORS)}"
-        parts = self.stamp() + [("<", "text"), (nick, nick_tag), ("> ", "text"), (text, tag)]
+    def chat_line(self, w, nick, text, tag, suffix="", event=None):
+        mine = nick == self.settings["node_name"]
+        nick_tag = "bot" if mine else f"nick{sum(map(ord, nick)) % len(self.theme['nicks'])}"
+        words = [x.strip() for x in self.settings.get("highlight_words", "").split(",") if x.strip()]
+        body, me, word = (split_mentions(text, tag, self.settings["node_name"], words) if not mine else ([(text, tag)], False, False))
+        parts = self.stamp() + [("<", "text"), (nick, nick_tag), ("> ", "text")] + body
         if suffix: parts.append((f"  {suffix}", "meta"))
         w.write(parts)
         w.nicks.add(nick)
         self.mark_unread(w, "msg")
         if w is self.current: self.refresh_nicks()
+        if not mine:
+            watching = w is self.current and self.root.focus_displayof() is not None
+            kind = "private" if event == "private" else "mention" if me else "highlight" if word else "channel"
+            if not watching: gui_sounds.notify(self.settings, kind, self.root.bell)
 
     # ---- queue handlers (GUI thread) ----------------------------------------------------------
     def drain(self):
@@ -409,6 +412,8 @@ class App:
     def _h_chat(self, kind, idx, text, nick, extra):
         if kind == "dm": return self._dm_in(text, extra.get("pubkey") or nick, extra)
         name = display_for_index(idx)
+        closed = self.settings.get("closed_channels", [])
+        if name in closed and name not in self.windows: closed.remove(name)       # someone spoke: the channel comes back
         w = self.windows.get(name) or self.add_window(name, CHANNELS.get(name, f"Channel {idx}"))
         if kind == "out":
             self.chat_line(w, self.settings["node_name"], text, extra.get("alert", "text"))
@@ -428,12 +433,15 @@ class App:
         was = self.connected
         self.connected = state == "connected"
         self.sb_state.config(text={"connecting": "Connecting...", "connected": f"Connected ({detail})", "stopped": "Not connected"}[state])
-        if self.connected and not was: self.addons.dispatch("on_connect")
+        if self.connected and not was:
+            self.addons.dispatch("on_connect")
+            self.resolve_key_windows(ask_radio=True)
         if was and not self.connected: self.addons.dispatch("on_disconnect")
 
     def _h_channels(self):
+        closed = self.settings.get("closed_channels", [])
         for name, idx in ea.CHANNEL_INDEX_BY_NAME.items():
-            if name != "Public": self.add_window("#" + name.lstrip("#"), CHANNELS.get("#" + name.lstrip("#"), f"Channel {idx}"))
+            if name != "Public" and "#" + name.lstrip("#") not in closed: self.add_window("#" + name.lstrip("#"), CHANNELS.get("#" + name.lstrip("#"), f"Channel {idx}"))
         self.status_line(f"*** Resolved channels: {', '.join(f'{n}={i}' for n, i in ea.CHANNEL_INDEX_BY_NAME.items())}", "info")
 
     def _h_nodes(self, r):
@@ -443,6 +451,7 @@ class App:
                              + (f", {r['removed_from_radio']} removed from radio" if r["removed_from_radio"] else "") + ")", "info")
         if r["on_radio"] >= cap * 0.95:
             self.status_line(f"*** Radio contact list nearly full ({r['on_radio']}/{cap}) - new nodes may not fit on the radio, but they are still remembered here.", "warn")
+        self.resolve_key_windows()
         if self.map_win is not None and self.map_win.winfo_exists(): self.map_win.refresh(force=True)
 
     def _h_nodeinfo(self, node):
@@ -474,6 +483,10 @@ class App:
         if self.settings.get("last_port") != port:
             self.settings["last_port"] = port
             self.save()
+
+
+
+
 
     def raise_window(self):
         r = self.root
@@ -512,8 +525,14 @@ class App:
         s = self.settings
         ea.BOT_NICK = s["node_name"]
         self.font.configure(size=s["font_size"])
+        if hasattr(self, "tree"): self.apply_theme()
         self.save()
         if self.current: self.refresh_nicks()
+
+    def apply_theme(self):
+        self.theme = gui_themes.get(self.settings.get("theme"))
+        for w in self.windows.values(): w.apply_theme(self.theme, self.font)
+        gui_themes.style_panes(self, self.theme)
 
     def node_sync_worker(self):
         """Runs on a worker thread: read the radio's contacts into long-term memory and forget stale ones."""
@@ -588,7 +607,7 @@ class App:
         self.entry.delete(0, "end")
         self.counter.config(text=f"0/{ea.MESH_MSG_MAX_CHARS}", fg="black")
         if not text: return
-        self.history.append(text)
+        if not text.lower().startswith("/login"): self.history.append(text)      # never keep an admin password in the recall list
         self.hist_pos = len(self.history)
         if text.startswith("/"): self.command(text[1:])
         elif self.current is self.status: self.status_line("*** Select a channel window to chat, or type /help.", "warn")
@@ -614,6 +633,12 @@ class App:
     def command(self, line):
         cmd, _, arg = line.partition(" ")
         cmd, arg = cmd.lower(), arg.strip()
+        if cmd == "login": return self.cmd_login(arg)
+        if cmd == "logout": return self.cmd_logout(arg)
+        if cmd == "rpt":
+            if self.is_remote_window() and arg: return self.send_remote(self.current, arg)
+            return self.status_line("*** /rpt <text> sends raw text to the repeater of the current private window.", "warn")
+        if self.try_remote_command(cmd, arg): return          # in a repeater / room-server window, CLI commands go to that node
         simple = {"list": lambda: ChannelListDialog(self), "map": self.open_map, "nodes": self.open_node_list, "addons": self.open_addons,
                   "options": self.open_options, "connect": self.connect, "disconnect": self.disconnect, "quit": self.quit}
         if cmd == "help":
@@ -645,7 +670,8 @@ class App:
                 self.status_line(("*** " if ok else "*** ERROR: ") + msg, "info" if ok else "error")
             self.status_line(f"*** Setting {arg} MHz and rebooting the node (about 20s)...", "info")
             self.bg(work, done)
-        else: self.status_line(f"*** Unknown command: /{cmd}  (try /help)", "error")
+        elif self.run_node_command(cmd, arg): pass            # everything else meshcli knows runs on your own node
+        else: self.status_line(f"*** Unknown command: /{cmd}  (type / to see the list)", "error")
 
     # ---- demo ---------------------------------------------------------------------------------
     def load_demo(self):
@@ -656,7 +682,7 @@ class App:
                  ("Victoria Hub", 2, 48.46, -123.36, 900), ("Nanaimo Rptr", 2, 49.17, -123.94, 7200), ("Alice", 1, 49.28, -123.12, 120),
                  ("Bob", 1, 49.19, -122.85, 30), ("Langley Room", 3, 49.10, -122.60, 5000), ("Tofino Sensor", 4, 49.15, -125.90, 600),
                  ("Old Whistler Rptr", 2, 50.12, -122.95, 8 * 86400), ("Kamloops Rptr", 2, 50.67, -120.33, 2 * 86400)]
-        radio = {f"{i:064x}": {"public_key": f"{i:064x}", "adv_name": n, "type": t, "adv_lat": la, "adv_lon": lo, "last_advert": now - a, "lastmod": now - a}
+        radio = {f"{i + 16:02x}" * 32: {"public_key": f"{i + 16:02x}" * 32, "adv_name": n, "type": t, "adv_lat": la, "adv_lon": lo, "last_advert": now - a, "lastmod": now - a}
                  for i, (n, t, la, lo, a) in enumerate(spots)}
         self.nodes.update_from_radio(radio, now)
         self.nodes.update_from_radio({k: v for k, v in radio.items() if k not in list(radio)[-2:]}, now)  # last two fall off the radio but stay remembered
@@ -666,8 +692,8 @@ class App:
         for kind, idx, text, nick, extra in feed: self._h_chat(kind, idx, text, nick or self.settings["node_name"], extra)
         self._h_channels()
         self.addons.dispatch("on_demo")
-        self._dm_in("Hey, is the Burnaby closure clear yet?", f"{5:064x}", {"snr": 10.5, "hops": 1})
-        self._dm_in("Thanks for the relay earlier!", f"{6:064x}", {"snr": 12.0, "hops": 0})
+        self._dm_in("Hey, is the Burnaby closure clear yet?", f"{5 + 16:02x}" * 32, {"snr": 10.5, "hops": 1})
+        self._dm_in("Thanks for the relay earlier!", f"{6 + 16:02x}" * 32, {"snr": 12.0, "hops": 0})
         self.select_window("Public")
 
 

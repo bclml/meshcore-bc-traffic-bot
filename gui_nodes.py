@@ -58,6 +58,20 @@ class NodeStore:
             self.db.commit()
         return new, len(contacts)
 
+    def touch_contact(self, c, now=None):
+        """Remember one radio contact as seen right now (used when a node we only knew by key sends us a message)."""
+        now = int(now or time.time())
+        key = c.get("public_key")
+        if not key: return
+        lat, lon = float(c.get("adv_lat") or 0), float(c.get("adv_lon") or 0)
+        with self.lock:
+            row = self.db.execute("SELECT lat, lon, first_seen FROM nodes WHERE public_key=?", (key,)).fetchone()
+            if row and not (lat or lon): lat, lon = row["lat"], row["lon"]
+            self.db.execute("INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?,?,?,1)",
+                            (key, c.get("adv_name") or key[:8], int(c.get("type") or 0), lat, lon, row["first_seen"] if row else now, now,
+                             int(c.get("last_advert") or 0), int(c.get("lastmod") or 0)))
+            self.db.commit()
+
     def prune(self, days, now=None):
         """Forget nodes not seen for `days` days (0 = never).  Returns [(public_key, was_on_radio)]."""
         if days <= 0: return []

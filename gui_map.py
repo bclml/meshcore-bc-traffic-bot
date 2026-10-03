@@ -72,6 +72,12 @@ class MapWindow(tk.Toplevel):
         self.map.pack(side="left", fill="both", expand=True)
         self.refresh()
 
+    def focus_on(self, lat, lon):
+        """Used by 'Show on map' in the right-click menus."""
+        if tkintermapview:
+            self.map.set_position(lat, lon)
+            self.map.set_zoom(13)
+
     def center(self):
         if tkintermapview:
             self.map.set_position(*BC_CENTER)

@@ -5,6 +5,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 import meshcore_io as ea
+import gui_themes
+import gui_sounds
 from gui_common import BG, CHANNELS, channel_index
 from gui_nodes import TYPE_NAMES
 from gui_nodepages import NodePages
@@ -16,7 +18,7 @@ from tkinter import filedialog
 
 
 class OptionsDialog(tk.Toplevel):
-    PAGES = {"Connect": "_page_connect", "Node memory": "_page_nodes", "Map": "_page_map", "Display": "_page_display"}
+    PAGES = {"Connect": "_page_connect", "Node memory": "_page_nodes", "Map": "_page_map", "Display": "_page_display", "Sounds": "_page_sounds"}
 
     def __init__(self, app):
         super().__init__(app.root, bg=BG)
@@ -25,7 +27,8 @@ class OptionsDialog(tk.Toplevel):
         self.geometry("720x540")
         self.transient(app.root)
         keys = ("mode", "port", "baud", "ble_target", "tcp_host", "tcp_port", "node_name", "location", "poll_seconds", "node_lat", "node_lon", "node_prune_days",
-                "node_sync_minutes", "radio_capacity", "prune_radio", "show_time", "font_size", "auto_connect", "log_enabled", "log_history", "check_updates")
+                "node_sync_minutes", "radio_capacity", "prune_radio", "show_time", "font_size", "auto_connect", "log_enabled", "log_history", "check_updates",
+                "theme", "highlight_words", "sounds_enabled", "sound_private", "sound_mention", "sound_highlight", "sound_channel", "sound_custom")
         self.vars = {k: (tk.BooleanVar if isinstance(s[k], bool) else tk.StringVar)(value=s[k] if isinstance(s[k], bool) else str(s[k])) for k in keys}
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True, padx=6, pady=6)
@@ -36,7 +39,7 @@ class OptionsDialog(tk.Toplevel):
         self.frames = {}
         self.node_pages = NodePages(self)
         node_frames = self.node_pages.build(self.stage)
-        order = ["Connect", *node_frames, "Node memory", "Map", "Display"]
+        order = ["Connect", *node_frames, "Node memory", "Map", "Display", "Sounds"]
         for name in order:
             self.tree.insert("", "end", iid=name, text=name)
             self.frames[name] = node_frames[name] if name in node_frames else getattr(self, self.PAGES[name])(tk.Frame(self.stage, bg=BG))
@@ -116,6 +119,20 @@ class OptionsDialog(tk.Toplevel):
     def _node_action(self):
         if self.apply(): self.app.sync_nodes_now(then=self._update_node_stats)
 
+    def _page_sounds(self, f):
+        self._head(f, "Notification sounds")
+        tk.Checkbutton(f, text="Play sounds (only when you are not looking at that window)", variable=self.vars["sounds_enabled"], bg=BG).pack(anchor="w", pady=(0, 6))
+        choices = list(gui_sounds.SOUNDS) + ["Custom file"]
+        for event, (label, _) in gui_sounds.EVENTS.items():
+            r = tk.Frame(f, bg=BG)
+            r.pack(fill="x", pady=2)
+            tk.Label(r, text=label, bg=BG, width=44, anchor="w").pack(side="left")
+            ttk.Combobox(r, textvariable=self.vars["sound_" + event], values=choices, state="readonly", width=13).pack(side="left", padx=4)
+            ttk.Button(r, text="Test", width=5, command=lambda e=event: gui_sounds.play(self.vars["sound_" + e].get(), self.vars["sound_custom"].get(), self.bell)).pack(side="left")
+        self._row(f, "Custom .wav file:", "sound_custom", 34)
+        tk.Label(f, text="Pick 'Custom file' above to use it. A short pause between sounds stops a busy mesh from beeping non-stop.", bg=BG, fg="#555", wraplength=440, justify="left").pack(anchor="w", pady=4)
+        return f
+
     def _page_map(self, f):
         self._head(f, "Position of this node on the map")
         self._row(f, "Latitude:", "node_lat", 12)
@@ -124,7 +141,13 @@ class OptionsDialog(tk.Toplevel):
 
     def _page_display(self, f):
         self._head(f, "Display")
-        tk.Checkbutton(f, text="Show timestamps", variable=self.vars["show_time"], bg=BG).pack(anchor="w")
+        r = tk.Frame(f, bg=BG)
+        r.pack(fill="x", pady=3)
+        tk.Label(r, text="Colour theme:", bg=BG, width=30, anchor="w").pack(side="left")
+        ttk.Combobox(r, textvariable=self.vars["theme"], values=list(gui_themes.THEMES), state="readonly", width=16).pack(side="left")
+        self._row(f, "Highlight words (comma separated):", "highlight_words", 24)
+        tk.Label(f, text="@nickname and @[nick name] in messages are highlighted automatically (stronger when it is your name).", bg=BG, fg="#555", wraplength=420, justify="left").pack(anchor="w")
+        tk.Checkbutton(f, text="Show timestamps", variable=self.vars["show_time"], bg=BG).pack(anchor="w", pady=(6, 0))
         self._row(f, "Font size:", "font_size", 4)
         tk.Checkbutton(f, text="Check for updates when the GUI starts (once a day)", variable=self.vars["check_updates"], bg=BG).pack(anchor="w", pady=(8, 0))
         tk.Checkbutton(f, text="Keep a log file per window (logs/ folder, one .txt each)", variable=self.vars["log_enabled"], bg=BG).pack(anchor="w", pady=(8, 0))
@@ -282,13 +305,17 @@ class ChannelListDialog(tk.Toplevel):
         for c, w in zip(cols, (110, 50, 50, 410)):
             t.heading(c, text=c.capitalize())
             t.column(c, width=w, anchor="w")
-        for name in app.windows:
-            if name == "Status": continue
+        names = [n for n in app.windows if n != "Status" and not n.startswith("@")]
+        for raw in ea.CHANNEL_INDEX_BY_NAME:
+            n = "Public" if raw == "Public" else "#" + raw.lstrip("#")
+            if n not in names: names.append(n)
+        for name in names:
             idx = channel_index(name)
-            t.insert("", "end", iid=name, values=(name, "?" if idx is None else idx, len(app.windows[name].nicks), app.windows[name].topic))
+            w = app.windows.get(name)
+            t.insert("", "end", iid=name, values=(name, "?" if idx is None else idx, len(w.nicks) if w else 0, w.topic if w else "(closed - double-click to reopen)"))
         t.pack(fill="both", expand=True, padx=6, pady=6)
-        t.bind("<Double-1>", lambda e: (app.select_window(t.selection()[0]), self.destroy()) if t.selection() else None)
-        tk.Label(self, text="Double-click a channel to open it.", bg=BG).pack(pady=(0, 6))
+        t.bind("<Double-1>", lambda e: (app.open_channel(t.selection()[0]), self.destroy()) if t.selection() else None)
+        tk.Label(self, text="Double-click a channel to open it. Right-click a channel in the window tree for more options.", bg=BG).pack(pady=(0, 6))
 
 
 def show_about(root):

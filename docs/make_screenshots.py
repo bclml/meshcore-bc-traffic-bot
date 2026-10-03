@@ -67,6 +67,23 @@ def steps():
     app.select_window("@Alice"); yield 800
     grab(root, "direct-messages.png")
 
+    rpt = app.nodes.find_by_name("Surrey Repeater")
+    app.open_query("Surrey Repeater", rpt["public_key"]); yield 400
+    app.entry.delete(0, "end"); app.entry.insert(0, "/re"); app.cmd_popup.update("/re"); yield 700
+    grab(root, "commands.png")
+    app.cmd_popup.hide(); app.entry.delete(0, "end")
+
+    pub = app.windows["Public"]
+    app.select_window("Public")
+    for nick, text in (("Alice", "@[Bob] did you get the relay up on the hill?"), ("Bob", "@Alice yes, 4 hops now - thanks for the help!"),
+                       ("Carol", "@DemoNode can you check the Highway 1 bridge?"), ("Alice", "Installing the repeater soon, @Bob @[Carol]")):
+        app.chat_line(pub, nick, text, "text", "(SNR 11.5, 3 hops)")
+    app.settings["highlight_words"] = "bridge"; app.chat_line(pub, "Bob", "the bridge reopened", "text")
+    app.settings["theme"] = "Night"; app.apply_theme(); yield 600
+    grab(root, "theme-night.png")
+    app.settings["theme"] = "Classic mIRC"; app.apply_theme(); app.settings["highlight_words"] = ""
+    app.select_window("@Alice")
+
     app.switchbar.set_dock("left"); yield 700
     grab(root, "switchbar-docked.png")
     app.switchbar.set_dock("top")

@@ -22,6 +22,7 @@ from gui_logs import WindowLog, LOG_DIR, logged_windows
 import gui_update
 import gui_style
 import gui_diag
+from gui_adverts import AdvertWatcher
 from gui_report import BugReportDialog
 from gui_switchbar import SwitchBar
 from gui_update_ui import UpdateDialog, CatalogDialog, LINKS, open_link
@@ -168,7 +169,7 @@ class CoreWorker:
                 if now - last_sync >= self.app.settings["node_sync_minutes"] * 60:
                     last_sync = now
                     self.app.node_sync_worker()
-                self.stop_evt.wait(self.app.settings["poll_seconds"])
+                self.app.adverts.listen(self.app.settings["poll_seconds"], self.stop_evt)      # idle time = listening for adverts (or just waiting)
         except Exception as e:
             logging.error(f"Connection ended: {e}")
             gui_diag.event("crash", "connection thread:\n" + traceback.format_exc())
@@ -201,6 +202,7 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
         self.worker = CoreWorker(self)
         self.nodes = NodeStore(":memory:") if demo else NodeStore()
         self.addons = AddonManager(self)
+        self.adverts = AdvertWatcher(self)
         if demo: self.settings["addons"], self.settings["addons_enabled"] = {}, {n: True for n in self.addons.discover()}
         gui_style.apply_classic(root)   # old-mIRC chrome: must run before any widget exists
         self.font = gui_style.chat_font(self.settings["font_size"])
@@ -482,6 +484,25 @@ class App(PrivateMixin, MenusMixin, CommandsMixin):
             self.status_line(f"*** Radio contact list nearly full ({r['on_radio']}/{cap}) - new nodes may not fit on the radio, but they are still remembered here.", "warn")
         self.resolve_key_windows()
         if self.map_win is not None and self.map_win.winfo_exists(): self.map_win.refresh(force=True)
+
+    def _h_advert(self, kind, c):
+        """A node advertised (or changed) while the advert listener was connected."""
+        key = c["public_key"]
+        known = self.nodes.find_by_prefix(key)
+        if kind == "new_contact": new = self.nodes.remember_pending(c)
+        else:
+            self.nodes.touch_contact(c)
+            new = known is None
+        if new and self.settings.get("advert_notices", True):
+            what = gui_nodes.TYPE_NAMES.get(int(c.get("type") or 0), "Node")
+            note = " (waiting for approval - the radio is in manual-add mode)" if kind == "new_contact" else ""
+            self.status_line(f"*** New {what.lower()} heard: {c.get('adv_name') or key[:8]}{note}", "info")
+        self.resolve_key_windows()                                 # a private window that only had a key gets its real name now
+        for attr, update in (("map_win", "refresh"), ("nodes_win", "fill")):      # open map / node list show it straight away
+            w = getattr(self, attr, None)
+            try:
+                if w is not None and w.winfo_exists(): getattr(w, update)()
+            except Exception: pass
 
     def _h_nodeinfo(self, node):
         self.adopt_node_info(node)

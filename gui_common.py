@@ -14,6 +14,8 @@ DEFAULT_SETTINGS = {
     "node_sync_minutes": 5,      # how often to read the radio's contact list into long-term memory
     "radio_capacity": 350,       # how many contacts the radio itself can hold
     "prune_radio": False,        # also delete forgotten nodes from the radio itself
+    "advert_listen": True,       # between polls, listen for adverts so new / changed nodes show up at once (USB and WiFi)
+    "advert_notices": True,      # say in the Status window when a node is heard for the first time
     "show_time": True, "font_size": 10, "auto_connect": False,
     "check_updates": True,       # look for a newer version at startup (at most once a day)
     "last_update_check": 0,

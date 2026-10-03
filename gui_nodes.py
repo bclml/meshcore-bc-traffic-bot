@@ -72,6 +72,28 @@ class NodeStore:
                              int(c.get("last_advert") or 0), int(c.get("lastmod") or 0)))
             self.db.commit()
 
+    def max_lastmod(self):
+        """Newest 'last modified' stamp the radio ever gave us (the advert listener asks the radio only for what changed after it)."""
+        with self.lock:
+            r = self.db.execute("SELECT MAX(lastmod) FROM nodes WHERE on_radio = 1").fetchone()
+        return int(r[0] or 0)
+
+    def remember_pending(self, c, now=None):
+        """An advert from a node the radio did not add (manual-add mode): remember it, marked as not on the radio.  Returns True if new."""
+        now = int(now or time.time())
+        key = c.get("public_key")
+        if not key: return False
+        lat, lon = float(c.get("adv_lat") or 0), float(c.get("adv_lon") or 0)
+        with self.lock:
+            row = self.db.execute("SELECT public_key FROM nodes WHERE public_key=?", (key,)).fetchone()
+            if row:
+                self.db.execute("UPDATE nodes SET last_seen=?, name=COALESCE(NULLIF(?, ''), name) WHERE public_key=?", (now, c.get("adv_name") or "", key))
+            else:
+                self.db.execute("INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?,0)", (key, c.get("adv_name") or key[:8], int(c.get("type") or 0), lat, lon,
+                                                                                    now, now, int(c.get("last_advert") or 0), int(c.get("lastmod") or 0)))
+            self.db.commit()
+        return row is None
+
     def prune(self, days, now=None):
         """Forget nodes not seen for `days` days (0 = never).  Returns [(public_key, was_on_radio)]."""
         if days <= 0: return []

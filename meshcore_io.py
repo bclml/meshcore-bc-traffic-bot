@@ -18,7 +18,27 @@ TRACE = None  # set by gui_diag: TRACE(args, attempt, outcome, seconds, detail) 
 CONNECTION_ARGS = None  # meshcli connection prefix, e.g. ["-s", "COM4"] or ["-a", "AA:BB:CC:DD:EE:FF"]
 
 # --- OPTIONAL GUI HOOKS (see mcIRC.py; harmless when running headless) ---
-MESH_LOCK = threading.RLock()  # only one meshcli process may hold the COM port at a time; the GUI sends chat from its own thread
+class _MeshLock:
+    """Only one program may hold the COM port at a time.  An RLock, plus: when somebody has to wait for it, `on_contend` is called so an
+    idle-time listener (gui_adverts.py) can let go of the radio at once instead of making them wait for its whole slice."""
+    def __init__(self):
+        self._lock = threading.RLock()
+        self.on_contend = None
+
+    def acquire(self, blocking=True, timeout=-1):
+        if self._lock.acquire(False): return True
+        if not blocking: return False
+        if self.on_contend is not None:
+            try: self.on_contend()
+            except Exception: pass
+        return self._lock.acquire(True, timeout)
+
+    def release(self): self._lock.release()
+    def __enter__(self): self.acquire(); return self
+    def __exit__(self, *exc): self.release()
+
+
+MESH_LOCK = _MeshLock()  # only one meshcli process may hold the COM port at a time; the GUI sends chat from its own thread
 
 BOT_NICK = "MyNode"
 

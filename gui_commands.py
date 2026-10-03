@@ -23,7 +23,7 @@ APP = [("help", "", "Show this command list in the Status window", False), ("lis
        ("logout", "", "Forget the login for this repeater", False),
        ("node", "<meshcli command>", "Run a meshcli command on YOUR node (when a repeater window is open)", False),
        ("rpt", "<text>", "Send raw text to the repeater in this private window", False),
-       ("meshcli", "<command...>", "Run any meshcli command on your node", False), ("bug", "", "Report a bug (sends a troubleshooting log to GitHub)", False), ("donate", "", "Support mcIRC with an optional donation (PayPal.Me)", False), ("quit", "", "Exit mcIRC", False)]
+       ("meshcli", "<command...>", "Run any meshcli command on your node", False), ("bug", "", "Report a bug (sends a troubleshooting log to GitHub)", False), ("donate", "", "Support mcIRC with an optional donation (PayPal)", False), ("quit", "", "Exit mcIRC", False)]
 
 # MeshCore repeater / room-server CLI (docs/cli_commands.md in the MeshCore firmware repo)
 REMOTE = [("reboot", "", "Reboot the repeater", True), ("poweroff", "", "Power the repeater off", True), ("shutdown", "", "Power the repeater off", True),

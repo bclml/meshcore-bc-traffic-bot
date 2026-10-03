@@ -138,7 +138,7 @@ This was built for British Columbia specifically (DriveBC, BC Ferries, BC Transi
 
 ## Support mcIRC
 
-mcIRC is free and stays free; every feature works the same whether or not you donate. If it is useful to you, an optional donation is greatly appreciated: the red heart in the toolbar (or **Help > Support mcIRC**, or `/donate`) opens the project's PayPal.Me page, where you choose any amount. It only opens PayPal's page in your browser; mcIRC never sees your card or account details.
+mcIRC is free and stays free; every feature works the same whether or not you donate. If it is useful to you, an optional donation is greatly appreciated: the red heart in the toolbar (or **Help > Support mcIRC**, or `/donate`) opens PayPal, where you can donate $1 CAD times however many you choose (1 to 100) one time, or subscribe to $1 CAD a month (cancel any time). It only opens PayPal's page in your browser; mcIRC never sees your card or account details.
 
 ## License
 

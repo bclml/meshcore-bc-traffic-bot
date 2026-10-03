@@ -50,14 +50,22 @@ class BugReportDialog(tk.Toplevel):
         super().__init__(app.root, bg=BG)
         self.app = app
         self.title("Report a bug")
-        self.geometry("760x680")
+        self.geometry("760x640")
+        self.minsize(560, 480)
         self.transient(app.root)
+        btns = tk.Frame(self, bg=BG)
+        btns.pack(side="bottom", fill="x", padx=10, pady=8)
+        ttk.Button(btns, text="Send to GitHub...", command=self.send).pack(side="left")
+        ttk.Button(btns, text="Copy report", command=self.copy).pack(side="left", padx=4)
+        ttk.Button(btns, text="Save as file...", command=self.save).pack(side="left")
+        ttk.Button(btns, text="Open logs folder", command=app.open_diag_folder).pack(side="left", padx=4)
+        ttk.Button(btns, text="Close", command=self.destroy).pack(side="right")
         tk.Label(self, text="Report a bug", bg=BG, font=("Segoe UI", 11, "bold"), anchor="w").pack(fill="x", padx=10, pady=(10, 0))
         tk.Label(self, text=PRIVACY, bg=BG, fg="#444", justify="left", anchor="w", wraplength=730).pack(fill="x", padx=10, pady=(2, 6))
 
         tk.Label(self, text="What went wrong? What did you do, what did you expect, and what happened instead? Which board / device do you use?",
                  bg=BG, anchor="w", wraplength=730, justify="left").pack(fill="x", padx=10)
-        self.what = tk.Text(self, height=7, wrap="word", relief="sunken", bd=2, font=("Segoe UI", 10))
+        self.what = tk.Text(self, height=6, wrap="word", relief="sunken", bd=2, font=("Segoe UI", 10))
         self.what.pack(fill="x", padx=10, pady=(2, 6))
         self.what.focus_set()
 
@@ -78,17 +86,10 @@ class BugReportDialog(tk.Toplevel):
         box.pack(fill="both", expand=True, padx=10, pady=2)
         sb = ttk.Scrollbar(box)
         sb.pack(side="right", fill="y")
-        self.preview = tk.Text(box, wrap="none", font=("Consolas", 9), yscrollcommand=sb.set, relief="sunken", bd=2)
+        self.preview = tk.Text(box, wrap="none", height=8, font=("Consolas", 9), yscrollcommand=sb.set, relief="sunken", bd=2)
         self.preview.pack(side="left", fill="both", expand=True)
         sb.config(command=self.preview.yview)
 
-        btns = tk.Frame(self, bg=BG)
-        btns.pack(fill="x", padx=10, pady=8)
-        ttk.Button(btns, text="Send to GitHub...", command=self.send).pack(side="left")
-        ttk.Button(btns, text="Copy report", command=self.copy).pack(side="left", padx=4)
-        ttk.Button(btns, text="Save as file...", command=self.save).pack(side="left")
-        ttk.Button(btns, text="Open logs folder", command=app.open_diag_folder).pack(side="left", padx=4)
-        ttk.Button(btns, text="Close", command=self.destroy).pack(side="right")
         self.refresh()
 
     # ---- content ----

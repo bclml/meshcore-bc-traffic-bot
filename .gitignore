@@ -14,3 +14,14 @@ bc_traffic_agent.zip
 # Editor/OS cruft
 .DS_Store
 Thumbs.db
+
+# GUI settings may contain your TransLink API key - never commit
+gui_settings.json
+nodes.db
+logs/
+
+# Installed addons are local to each PC (the source lives in packages/); only the template is tracked
+addons/*
+!addons/_example_addon.py
+update_state.json
+backup/

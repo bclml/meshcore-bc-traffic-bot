@@ -1,5 +1,5 @@
 # BC Emergency Transportation Agent Installation Guide
-**Hardware Platform:** Heltec V3 LoRa Node  
+**Hardware Platform:** Any LoRa node running MeshCore Companion firmware (tested on a MeshCore node)  
 **Host System:** Windows 11  
 **Default Output Interface:** 5 category channels — #drivebc, #bcferries, #bctransit, #translink, #weather — plus #bot-van for testing
 **Distribution Type:** Fully Portable (Zero-Configuration, Auto-Detect)
@@ -9,7 +9,7 @@
 ## 1. System Overview
 The BC Emergency Transportation Agent is a lightweight, zero-configuration automation utility designed for MeshCore and Meshtastic operators across British Columbia. 
 
-The agent runs locally on a Windows 11 PC, scanning official public transit and highway/ferry status networks every 1 minute and weather sources every 10 minutes, without requiring expensive private developer API subscriptions [DriveBC Open511 API Guidelines - Gov.bc.ca]. When an incident is discovered matching localized criteria, the agent dynamically compiles the report, appends the user-defined regional scope identifier, and commands the Heltec V3 hardware — over USB or Bluetooth, your choice — to broadcast it over the local mesh network [BC Highway Events].
+The agent runs locally on a Windows 11 PC, scanning official public transit and highway/ferry status networks every 1 minute and weather sources every 10 minutes, without requiring expensive private developer API subscriptions [DriveBC Open511 API Guidelines - Gov.bc.ca]. When an incident is discovered matching localized criteria, the agent dynamically compiles the report, appends the user-defined regional scope identifier, and commands the MeshCore node hardware — over USB or Bluetooth, your choice — to broadcast it over the local mesh network [BC Highway Events].
 
 ### Key Operational Features
 *   **Comprehensive Data Scrape:** Monitors live data from DriveBC Events, BC Ferries Service Notices, TransLink (SkyTrain, Bus, SeaBus, West Coast Express), and BC Transit (Victoria, Nanaimo, Comox Valley, Cowichan Valley, Salt Spring Island, Campbell River, Port Alberni, Powell River, Sunshine Coast) every 1 minute, and weather forecasts/warnings every 10 minutes [BC Highway Events].
@@ -21,7 +21,7 @@ The agent runs locally on a Windows 11 PC, scanning official public transit and 
 *   **Dynamic Regional Scoping:** Prompts the user on launch to enable or disable regional scopes. When enabled, it allows custom shortcodes (e.g., `LML`, `VI`, `SC`) to be independently assigned to the Lower Mainland, Vancouver Island, and the Sunshine Coast [BC Highway Events].
 *   **Incident Lifecycle Tracking:** Tracks events in real-time. It broadcasts an emergency alert immediately when a new problem is found, and automatically follows up with a `✅ CLEARED` message the moment the incident drops off public feeds [BC Highway Events].
 *   **Smart Anti-Spam Sync:** On startup, the script automatically parses its historical log file to rebuild active incident memory. This ensures that restarting the agent will never trigger duplicate or repetitive broadcasts over the radio.
-*   **Choice of Connection:** On launch, the agent asks whether to connect to the Heltec node over **USB** (auto-detects the serial port) or **Bluetooth** (auto-scans and connects over BLE) — no manual port/address entry needed either way.
+*   **Choice of Connection:** On launch, the agent asks whether to connect to the MeshCore node over **USB** (auto-detects the serial port) or **Bluetooth** (auto-scans and connects over BLE) — no manual port/address entry needed either way.
 
 ---
 
@@ -51,9 +51,9 @@ TransLink's alerts require a free developer API key — BC Transit's do not.
      2. Close and reopen the terminal (or restart `Run_Agent.bat`) for the change to take effect.
      3. From then on, the agent will silently pick up the key from this variable and skip asking for it. The key lives only in your own Windows user environment — it's never written into `emergency_agent.py` itself.
 
-### Step 2.3: Pair the Heltec V3 Node over Bluetooth (only if you plan to use Bluetooth)
+### Step 2.3: Pair the MeshCore node over Bluetooth (only if you plan to use Bluetooth)
 If you intend to connect over USB, skip this step — just plug in the node with a data cable when you're ready to run the agent. If you intend to connect over Bluetooth:
-1. Power on the Heltec V3 node.
+1. Power on the MeshCore node.
 2. Open **Settings > Bluetooth & devices > Add device** on your Windows 11 PC.
 3. Select **Bluetooth**, wait for the node to appear (it will advertise as something like `MeshCore-xxxxx`), and pair it.
 4. Once paired, the node stays available for meshcli to connect to going forward — you don't need to repeat this step unless you unpair it or switch computers.
@@ -80,7 +80,7 @@ To keep the application fully portable and easy to manage, follow this specific 
 
 ## 4. Initial Hardware Node Configuration
 
-Before activating the automated scraping loop, all 5 category channels — `#drivebc`, `#bcferries`, `#bctransit`, `#translink`, `#weather` — plus one general-purpose testing channel, `#bot-van`, must be created on the Heltec V3's memory stack. This ensures the radio hardware knows which encryption key to use when formatting each channel's outbound RF packets.
+Before activating the automated scraping loop, all 5 category channels — `#drivebc`, `#bcferries`, `#bctransit`, `#translink`, `#weather` — plus one general-purpose testing channel, `#bot-van`, must be created on the MeshCore node's memory stack. This ensures the radio hardware knows which encryption key to use when formatting each channel's outbound RF packets.
 
 `#bot-van` isn't tied to any alert source — it's just a channel people can send "test" or "t" to and get an automatic `@name Test should be made in #bot-van` reply back, to confirm their signal is reaching the node. (The auto-reply actually works on any channel the agent can see messages on, not just this one — `#bot-van` just gives people an obvious, dedicated place to try it without cluttering the category channels.)
 
@@ -93,7 +93,7 @@ Save these keys somewhere safe — **every radio in your mesh that should be abl
 Pick whichever connection method you plan to use day-to-day for this one-time setup, and replace `<key1>` through `<key6>` below with 6 different keys from the command above (use a different key per channel so listeners can subscribe to categories independently):
 
 **If using USB:**
-1. Connect your Heltec V3 node to the computer using a verified **USB Data Cable** (do not use charge-only cables).
+1. Connect your MeshCore node to the computer using a verified **USB Data Cable** (do not use charge-only cables).
 2. Open your Windows terminal window and run:
    ```cmd
    meshcli -s COM4 add_channel drivebc <key1>
@@ -107,7 +107,7 @@ Pick whichever connection method you plan to use day-to-day for this one-time se
    *(Replace `COM4` with your actual port if different — check Device Manager if unsure. The agent script auto-detects the port on its own later, so this manual flag is only needed for this one-time setup.)*
 
 **If using Bluetooth:**
-1. Make sure the Heltec V3 node is powered on, within range, and already paired (see Step 2.3 above).
+1. Make sure the MeshCore node is powered on, within range, and already paired (see Step 2.3 above).
 2. Open your Windows terminal window and run:
    ```cmd
    meshcli -d "" add_channel drivebc <key1>
@@ -142,15 +142,15 @@ To start the automation, simply double-click the **`Run_Agent.bat`** file inside
 
 ### Step 5.2: Choosing a Connection Method
 The console will first ask:
-`Connect to the Heltec V3 via USB or Bluetooth? (usb/bluetooth):`
+`Connect to the MeshCore node via USB or Bluetooth? (usb/bluetooth):`
 
 Type `usb` or `bluetooth` (or just `u`/`b`) and press Enter.
 
-*   **USB:** The script scans system ports for the Heltec node's onboard hardware signature and prints:
-    `✅ Auto-Detected Heltec V3 Port: COM4`
+*   **USB:** The script scans system ports for the USB serial devices (and asks each one whether it is a MeshCore Companion) and prints:
+    `✅ Auto-detected MeshCore device on port: COM4`
     If nothing is found, make sure the node is connected with a data cable (not charge-only) and drivers are installed.
 *   **Bluetooth:** The script scans for the node over BLE and prints:
-    `✅ Auto-Detected Heltec V3 BLE Device: <bluetooth-address> (<device name>)`
+    `✅ Auto-detected Bluetooth MeshCore device: <bluetooth-address> (<device name>)`
     If nothing is found, double-check that the node is powered on, within range, and paired in Windows Bluetooth settings (Step 2.3).
 
 ### Step 5.2b: TransLink API Key
@@ -169,7 +169,7 @@ Directly following hardware detection, the console workflow will handle scope ta
 Following scope setup, the terminal will present an interactive frequency prompt:
 `Enter target frequency in MHz (e.g., 910.425) or press ENTER to skip:`
 
-*   **Tuning to a Custom Frequency:** Type your targeted regional mesh frequency using a standard 900MHz float layout (such as `910.425` or `910.525`) and hit **Enter**. The script will use whichever connection you chose (USB or Bluetooth) to flash your Heltec V3 radio registers, command the node to reboot, wait 5 seconds for the hardware to stabilize, and start the monitoring loops.
+*   **Tuning to a Custom Frequency:** Type your targeted regional mesh frequency using a standard 900MHz float layout (such as `910.425` or `910.525`) and hit **Enter**. The script will use whichever connection you chose (USB or Bluetooth) to flash your MeshCore node radio registers, command the node to reboot, wait 5 seconds for the hardware to stabilize, and start the monitoring loops.
 *   **Bypassing Frequency Configuration:** Press **Enter** directly on a completely blank prompt line. The script will safely skip configuration changes and immediately deploy the automated feed scanners using whatever frequency profile is already active on the device hardware.
 
 ---

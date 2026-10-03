@@ -1,0 +1,47 @@
+name: Addon submission
+description: Submit an addon to be reviewed, tested and added to the catalog
+title: "[Addon] "
+labels: ["addon-submission"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Addons in the catalog are reviewed and tested by a maintainer before they are listed. Please read
+        [docs/ADDONS.md](../blob/master/docs/ADDONS.md) first and run `python packages/check_package.py packages/<name>`.
+  - type: input
+    id: name
+    attributes:
+      label: Addon name
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What does it do?
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where is the code?
+      description: Link to a pull request that adds packages/<name>/, or to a repository / zip.
+    validations:
+      required: true
+  - type: textarea
+    id: tested
+    attributes:
+      label: How have you tested it?
+      description: Demo mode, real node (USB / Bluetooth), how long, anything it transmits.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: check_package.py passes
+          required: true
+        - label: It contains no secrets or personal data
+          required: true
+        - label: It has an off switch and does not flood the mesh
+          required: true
+        - label: I agree it is released under the project's MIT license
+          required: true

@@ -1,5 +1,9 @@
-import os, sys, asyncio, re, logging, requests, subprocess, datetime, base64, html, json, time, serial.tools.list_ports
+import os, sys, asyncio, re, logging, requests, subprocess, datetime, base64, html, json, time, threading, serial.tools.list_ports
 from logging.handlers import RotatingFileHandler
+import meshcore_io as io
+from meshcore_io import (execute_mesh_command, _emit, MESH_LOCK, MESH_MSG_MAX_CHARS, DEFAULT_CHANNEL_IDX, _TEST_SENDER_RE, auto_detect_usb_port,
+                         auto_detect_ble_device, resolve_channel_indices, fetch_incoming_messages, split_sender, redact, RedactFilter,
+                         get_radio_params, set_radio_frequency)
 
 # GTFS-Realtime (protobuf) support for TransLink and BC Transit service alerts. Both agencies'
 # alert *websites* (translink.ca/translink/alerts, alerts.bctransit.com) are JavaScript-only
@@ -13,12 +17,27 @@ try:
 except ImportError:
     GTFS_RT_AVAILABLE = False
 
+ALERT_LOCATIONS = {}  # "<source>|<guid>" -> (lat, lon, label) for alerts that carry coordinates (DriveBC); shown on the GUI map
+EARTHQUAKE_EVENTS = []  # recent BC-relevant quakes as (lat, lon, magnitude, place) for the GUI map
+
+# Broadcast switches (driven by the GUI's "BC traffic bot" addon; the console agent leaves everything on).
+# Muting only stops TRANSMITTING: feeds keep being read and incident state keeps updating, so unmuting
+# never floods the mesh with alerts that were suppressed in the meantime.
+TX_SOURCES = ["DriveBC", "BC Ferries", "BC Transit", "TransLink", "Weather", "Earthquake", "Tsunami", "Weekly reminder", "Test reply"]
+TX = {"muted": False, "sources": {k: True for k in TX_SOURCES}}
+
+def tx_allowed(kind):
+    if not TX["sources"].get(kind, True): return False
+    if TX["muted"]: return False  # master mute silences EVERYTHING, tsunami included - many stations run this bot, and they must not all transmit the same alert at once
+    return True
+
+def _tx_kind(source):
+    return "Weather" if source.startswith("Weather Warning:") or source in ("WX_6AM", "WX_8AM") else source
+
+
 # --- SYSTEM PATHS & COMS ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE_PATH = os.path.join(BASE_DIR, 'emergency_agent.log')
-DEFAULT_CLI_PATH = os.path.join(os.path.dirname(sys.executable), "Scripts", "meshcli.exe")
-BLE_SCAN_TIMEOUT = 10  # seconds to wait while scanning for the node over Bluetooth
-CONNECTION_ARGS = None  # meshcli connection prefix, e.g. ["-s", "COM4"] or ["-a", "AA:BB:CC:DD:EE:FF"]
 TRANSLINK_API_KEY = None  # free key from https://developer.translink.ca/Account/Register
 USE_SCOPES = False
 REGION_SCOPES = {"Lower Mainland": "", "Vancouver Island": "", "Sunshine Coast": ""}
@@ -38,13 +57,7 @@ CHANNEL_NAMES = {
     "TransLink": "translink",
 }
 WEATHER_CHANNEL_NAME = "weather"  # covers Environment Canada warnings + the daily 6AM/8AM forecast broadcasts
-# NOTE: no longer used as a fallback for category alerts (DriveBC/BC Ferries/BC Transit/TransLink/
-# weather) — see _resolve_channel_idx, which withholds those instead of ever sending them to
-# Public. Only still used as the last-resort channel for a test-message reply, in the vanishingly
-# unlikely case an incoming message payload is missing its own channel_idx field.
-DEFAULT_CHANNEL_IDX = 0
 
-CHANNEL_INDEX_BY_NAME = {}  # populated by resolve_channel_indices() at startup: {"drivebc": 1, "bctransit": 3, ...}
 _missing_channel_warned = set()  # so the "channel not found, falling back" warning only logs once per channel, not every single broadcast
 
 # --- WEEKLY PUBLIC-CHANNEL REMINDER ---
@@ -58,7 +71,6 @@ last_weekly_ad_sent = None  # (iso_year, iso_week) tuple of the last week this s
 # to recover who actually sent it; there's no more reliable field available for this.
 MESSAGE_POLL_SECONDS = 20  # how often to check for new incoming messages via `.sync_msgs`
 NODE_LOCATION_NAME = "Surrey"  # physical location of this radio, used in the auto-reply text
-_TEST_SENDER_RE = re.compile(r'^\s*([^:]+):\s*(.*)$')
 _recent_test_replies = set()  # small dedup guard: (channel_idx, sender_timestamp, text) tuples already replied to, in case a message is ever re-delivered across polls
 
 # Tracks the date each region's daily forecast last broadcast successfully (region -> "YYYY-MM-DD"),
@@ -197,8 +209,13 @@ WEATHER_EMOJIS = {0: "☀️", 1: "☀️", 2: "⛅", 3: "☁️", 45: "🌫️"
 _log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 _file_handler = RotatingFileHandler(LOG_FILE_PATH, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8')
 _file_handler.setFormatter(_log_formatter)
+
+
+
+_file_handler.addFilter(RedactFilter())
 console = logging.StreamHandler()
 console.setFormatter(_log_formatter)
+console.addFilter(RedactFilter())
 logging.getLogger('').setLevel(logging.INFO)
 logging.getLogger('').addHandler(_file_handler)
 logging.getLogger('').addHandler(console)
@@ -207,48 +224,7 @@ logging.getLogger('').addHandler(console)
 active_traffic_alerts = {}
 active_weather_alerts = {}
 
-def auto_detect_usb_port():
-    logging.info("Scanning USB serial ports...")
-    ports = list(serial.tools.list_ports.comports())
-    det = [p.device for p in ports if any(k in p.description.lower() for k in ["cp210", "silicon labs", "usb-to-uart"])]
-    if not det: det = [p.device for p in ports if "usb" in p.description.lower()]
-    if det:
-        port = det[0]
-        if len(det) > 1:
-            logging.warning(f"Multiple candidate serial ports found ({det}); using the first match: {port}")
-        logging.info(f"✅ Auto-Detected Heltec V3 Port: {port}")
-        return ["-s", port]
-    logging.critical("❌ No MeshCore USB hardware detected. Make sure the node is connected with a data cable (not charge-only) and drivers are installed.")
-    return None
 
-def auto_detect_ble_device():
-    logging.info(f"Scanning for MeshCore BLE devices ({BLE_SCAN_TIMEOUT}s)...")
-    binary = DEFAULT_CLI_PATH if os.path.exists(DEFAULT_CLI_PATH) else "meshcli"
-    try:
-        # -d "" tells meshcli to scan and connect to the first MeshCore companion device
-        # it finds over Bluetooth (no address/name filter). "infos" is just a cheap command
-        # to force the connection so we can read back which device it picked.
-        result = subprocess.run(
-            [binary, "-d", "", "-T", str(BLE_SCAN_TIMEOUT), "infos"],
-            capture_output=True, text=True, timeout=BLE_SCAN_TIMEOUT + 15
-        )
-    except subprocess.TimeoutExpired:
-        logging.critical("❌ BLE scan timed out. Make sure the node is powered on, in range, and already paired in Windows Bluetooth settings.")
-        return None
-    except Exception as e:
-        logging.critical(f"❌ BLE scan failed: {e}")
-        return None
-
-    combined = f"{result.stdout}\n{result.stderr}"
-    m = re.search(r'Found device\s*:\s*(.+)', combined)
-    if m:
-        addr, _, name = m.group(1).strip().rpartition(': ')
-        addr = addr.strip() or m.group(1).strip()
-        logging.info(f"✅ Auto-Detected Heltec V3 BLE Device: {addr} ({name.strip() or 'unknown name'})")
-        return ["-a", addr]
-
-    logging.critical("❌ No MeshCore BLE device detected. Make sure the node is powered on, within range, and paired with this computer first (Windows Settings > Bluetooth & devices > Add device).")
-    return None
 
 def check_regions_match(text, is_transit=False):
     if not text: return False
@@ -443,89 +419,13 @@ def get_applicable_scope(text, forced_region=None):
     if any(k in txt for k in SC) and REGION_SCOPES["Sunshine Coast"]: sc.append(REGION_SCOPES["Sunshine Coast"])
     return f"[{' '.join(sc)}] " if sc else ""
 
-# Every call to execute_mesh_command spins up a brand-new meshcli subprocess that does its own
-# full serial/BLE connect-handshake-disconnect cycle for that one command (there's no persistent
-# connection kept open between calls). Confirmed live in emergency_agent.log: meshcli prints
-# "No response from meshcore node, disconnecting" / "Are you sure your node is a serial companion?"
-# on a large fraction of calls (thousands of occurrences per log file) when the handshake loses a
-# race with the node being briefly busy — but it still EXITS 0 in that case, so the old code (which
-# only checked returncode) silently treated a failed handshake as success. For messages_loop this
-# meant "no messages this poll" could actually mean "never asked the node at all", and for
-# broadcast_via_cli it meant an alert could silently never go out. Retried like the existing
-# _get_with_retry pattern for BC Ferries, since a fresh subprocess attempt a couple seconds later
-# routinely succeeds.
-_TRANSIENT_MESHCLI_ERROR_RE = re.compile(r'No response from meshcore node|sure your node is a serial companion', re.IGNORECASE)
 
-def execute_mesh_command(args_list, timeout=30, retries=2, retry_delay=2):
-    binary = DEFAULT_CLI_PATH if os.path.exists(DEFAULT_CLI_PATH) else "meshcli"
-    last_err = None
-    for attempt in range(retries + 1):
-        try:
-            result = subprocess.run([binary] + args_list, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            last_err = RuntimeError(f"meshcli timed out after {timeout}s (BLE connection may have stalled or the node is out of range)")
-            if attempt < retries: time.sleep(retry_delay)
-            continue
-        if result.returncode != 0:
-            last_err = RuntimeError(result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}")
-        elif _TRANSIENT_MESHCLI_ERROR_RE.search(f"{result.stdout}\n{result.stderr}"):
-            last_err = RuntimeError("meshcli reported 'No response from meshcore node' (serial/BLE handshake failed this attempt)")
-        else:
-            return result
-        if attempt < retries: time.sleep(retry_delay)
-    raise last_err
 
 def _channel_name_for_source(source):
     if source.startswith("Weather Warning:") or source in ("WX_6AM", "WX_8AM"):
         return WEATHER_CHANNEL_NAME
     return CHANNEL_NAMES.get(source)
 
-def resolve_channel_indices():
-    """Fetches the node's real channel list (name -> index) via `.get_channels` — the leading dot
-    forces JSON output from meshcore-cli regardless of any global -j flag. Channel indices aren't
-    assumed/hardcoded (see CHANNEL_NAMES above); whatever this returns is what broadcast_via_cli
-    actually uses.
-
-    BUG FIX: confirmed live in production — this used to make exactly ONE attempt at startup with
-    no retry of its own. `.get_channels` hits the exact same transient "No response from meshcore
-    node, disconnecting" serial handshake race documented on execute_mesh_command (thousands of
-    occurrences/day in emergency_agent.log), and a single unlucky attempt right after boot (when
-    the node is still settling) permanently left CHANNEL_INDEX_BY_NAME empty for that ENTIRE run —
-    for as long as 5+ days across several restarts (2026-09-06 through -13) — silently routing
-    EVERY DriveBC/BC Ferries/BC Transit/TransLink/weather alert to the Public channel (0) instead
-    of its category channel, which is exactly the "why is the bot defaulting to public?" complaint
-    seen live on the mesh. execute_mesh_command already retries the transient handshake error
-    itself now, but this adds a second, slower retry layer on top specifically for startup timing
-    (node not fully awake yet), independent of that fix."""
-    global CHANNEL_INDEX_BY_NAME
-    last_err = None
-    for attempt in range(3):
-        try:
-            result = execute_mesh_command(CONNECTION_ARGS + [".get_channels"])
-            combined = f"{result.stdout}\n{result.stderr}"
-            # meshcli sometimes prints its own INFO: log lines before the JSON payload (seen with
-            # other commands like `infos`/BLE scans) — scan for wherever the actual JSON array
-            # starts rather than assuming stdout is pure JSON.
-            starts = [i for i in (combined.find("["), combined.find("{")) if i != -1]
-            if not starts:
-                raise ValueError("no JSON payload found in .get_channels output")
-            # BUG FIX: confirmed live — meshcli prints trailing text (e.g. a disconnect log line)
-            # AFTER the JSON array on its own line, which plain json.loads() rejects outright
-            # ("Extra data") since it requires the ENTIRE string to be exactly one JSON value.
-            # raw_decode() instead parses just the first complete JSON value and ignores whatever
-            # trails after it.
-            data, _ = json.JSONDecoder().raw_decode(combined[min(starts):])
-            CHANNEL_INDEX_BY_NAME = {c["channel_name"]: c["channel_idx"] for c in data if c.get("channel_name")}
-            logging.info(f"Resolved node channels: {CHANNEL_INDEX_BY_NAME}")
-            return
-        except Exception as e:
-            last_err = e
-            if attempt < 2: time.sleep(5)
-    logging.error(f"Could not read channel list from the node after 3 attempts ({last_err}). Category "
-                   f"alerts will be WITHHELD (not sent to Public) until channels resolve — this is "
-                   f"retried automatically every scan; see 'Resolved node channels' in the log once it "
-                   f"succeeds. If it never does, create #drivebc/#bcferries/#bctransit/#translink/"
-                   f"#weather (see How to run.txt) and restart.")
 
 def _resolve_channel_idx(source):
     """Returns None (never DEFAULT_CHANNEL_IDX/Public) when a source's channel can't be resolved —
@@ -536,7 +436,7 @@ def _resolve_channel_idx(source):
     changed)."""
     name = _channel_name_for_source(source)
     if name is None: return None
-    if name in CHANNEL_INDEX_BY_NAME: return CHANNEL_INDEX_BY_NAME[name]
+    if name in io.CHANNEL_INDEX_BY_NAME: return io.CHANNEL_INDEX_BY_NAME[name]
     if name not in _missing_channel_warned:
         logging.warning(f"Channel '#{name}' not found on this node — {source} alerts will be withheld "
                          f"(not sent to Public) until it's created. Create it with `add_channel {name} <key>` "
@@ -606,19 +506,6 @@ def reload_critical_alert_ids_from_log():
         logging.info(f"Restored {len(_earthquake_broadcast_ids)} earthquake + {len(_tsunami_broadcast_ids)} tsunami id(s) already announced in a previous run.")
     except Exception as e: logging.warning(f"Critical-alert id log sync failed: {e}")
 
-# MeshCore channel/group text messages are hard-capped by the firmware itself — per MeshCore's own
-# docs/issue tracker this lands somewhere around 120-167 characters depending on node name length,
-# channel scoping, and LoRa settings, with anything over the limit silently truncated (sometimes
-# mid-word, mid-detail — e.g. a "Route 1 cancelled" alert arrived as a cut-off partial message).
-# Rather than let the firmware chop it at an arbitrary point, the message is built to fit a
-# conservative budget ourselves, with an explicit "…" so a shortened message is at least obviously
-# shortened rather than looking like it just stops.
-# BUG FIX: this was 140, but the actual node's own message-compose UI shows a hard "0/127" character
-# counter for this channel — 140 was above the real device limit, so even our own "safely truncated"
-# 140-char messages were getting a SECOND, uncontrolled truncation by the firmware on top of ours,
-# cutting off exactly the trailing details (route/time) that matter most. Lowered below the observed
-# real limit with a small safety margin.
-MESH_MSG_MAX_CHARS = 120
 
 def broadcast_via_cli(source, title, description, is_clear=False, forced_region=None, guid=None):
     # guid (when known) is the feed's own stable identifier (GTFS entity.id, DriveBC event id, BC
@@ -634,6 +521,11 @@ def broadcast_via_cli(source, title, description, is_clear=False, forced_region=
     msg = header + body
     guid_tag = f" {{id:{guid}}}" if guid else ""
     chan_idx = _resolve_channel_idx(source)
+    if not tx_allowed(_tx_kind(source)):
+        # Same "Broadcasting ... to Channel Index N:" wording as a real send (prefixed so it's obvious in the
+        # log) so reload_active_alerts_from_log() still sees this alert as already announced after a restart.
+        logging.info(f"[MUTED - not transmitted] Broadcasting {'CLEAR' if is_clear else 'NEW'} to Channel Index {chan_idx if chan_idx is not None else 0}: [{source}] {title}{guid_tag}")
+        return
     if chan_idx is None:
         # Never fall back to Public (0) for a category alert — see _resolve_channel_idx. The
         # warning about which channel is missing/unresolved was already logged there (once).
@@ -642,26 +534,32 @@ def broadcast_via_cli(source, title, description, is_clear=False, forced_region=
         return
     logging.info(f"Broadcasting {'CLEAR' if is_clear else 'NEW'} to Channel Index {chan_idx}: [{source}] {title}{guid_tag}")
 
-    try: execute_mesh_command(CONNECTION_ARGS + ["chan", str(chan_idx), msg])
+    try:
+        execute_mesh_command(io.CONNECTION_ARGS + ["chan", str(chan_idx), msg])
+        _emit("out", chan_idx, msg, alert="clear" if is_clear else "new")
     except Exception as err: logging.error(f"Mesh CLI broadcast failed: {err}")
 
 def handle_weather_broadcast(source, title, body, is_clear=False, specific_region=None):
     broadcast_via_cli(source, title, body, is_clear, specific_region)
 
-async def broadcast_critical_all_channels(msg_body, label="ALERT"):
+async def broadcast_critical_all_channels(msg_body, label="ALERT", kind=None):
     """Sends msg_body, verbatim, to #public FIRST — that's where most listeners actually are, per
     request — then every category/testing channel currently resolved on this node. Used for alert
     types urgent enough to justify reaching every listener regardless of which single channel they
     happen to be subscribed to (tsunami Warning/Watch, earthquake), rather than routing to just one
     category channel like everything else. Public is guaranteed first here because channel 0 is
     always the lowest index and `targets` is sorted ascending — no special-casing needed."""
+    if not tx_allowed(kind or ("Tsunami" if "TSUNAMI" in label else "Earthquake")):
+        logging.info(f"[MUTED - not transmitted] {label}: {msg_body}")
+        return
     msg = msg_body if len(msg_body) <= MESH_MSG_MAX_CHARS else msg_body[:MESH_MSG_MAX_CHARS - 1].rstrip() + "…"
-    targets = sorted({0, *CHANNEL_INDEX_BY_NAME.values()})
+    targets = sorted({0, *io.CHANNEL_INDEX_BY_NAME.values()})
     for idx in targets:
         try:
             cmd = ["public", msg] if idx == 0 else ["chan", str(idx), msg]
-            execute_mesh_command(CONNECTION_ARGS + cmd)
+            execute_mesh_command(io.CONNECTION_ARGS + cmd)
             logging.info(f"Broadcasting {label} to Channel Index {idx}: {msg}")
+            _emit("out", idx, msg, alert="critical")
         except Exception as err:
             logging.error(f"{label} broadcast failed on channel {idx}: {err}")
         await asyncio.sleep(BROADCAST_PACING_SECONDS)
@@ -705,7 +603,7 @@ async def check_tsunami_warnings():
             _tsunami_broadcast_ids.add(entry_id)
             msg = f"🚨 TSUNAMI {category.upper()}: {headline or title}"
             logging.info(f"TSUNAMI {category.upper()} detected affecting BC — broadcasting to all channels: {title} ({entry_id})")
-            await broadcast_critical_all_channels(msg, "TSUNAMI ALERT")
+            await broadcast_critical_all_channels(msg, "TSUNAMI ALERT", "Tsunami")
     except Exception as e:
         logging.error(f"Tsunami feed check failed: {e}")
 
@@ -736,12 +634,14 @@ async def check_earthquake_warnings():
             lon, lat = coords[0], coords[1]
             if not _in_earthquake_bbox(lon, lat): continue
             _earthquake_broadcast_ids.add(eq_id)
+            EARTHQUAKE_EVENTS.append((lat, lon, mag, props.get("place") or "Unknown location"))
+            del EARTHQUAKE_EVENTS[:-20]
             place = props.get("place") or "Unknown location"
             depth_km = coords[2] if len(coords) > 2 else None
             depth_txt = f", {depth_km:.0f}km deep" if isinstance(depth_km, (int, float)) else ""
             msg = f"🌎 EARTHQUAKE M{mag:.1f}: {place}{depth_txt}"
             logging.info(f"Earthquake M{mag:.1f} detected near BC — broadcasting to Public + all channels: {place} ({eq_id})")
-            await broadcast_critical_all_channels(msg, "EARTHQUAKE ALERT")
+            await broadcast_critical_all_channels(msg, "EARTHQUAKE ALERT", "Earthquake")
     except Exception as e:
         logging.error(f"Earthquake feed check failed: {e}")
 
@@ -756,74 +656,73 @@ def check_weekly_channel_ad():
     if now.weekday() != 6 or now.hour != 12: return  # weekday() == 6 is Sunday
     wk = (now.isocalendar()[0], now.isocalendar()[1])
     if last_weekly_ad_sent == wk: return
+    if not tx_allowed("Weekly reminder"):
+        last_weekly_ad_sent = wk  # dropped, not queued - don't retry every 10 minutes for the rest of the hour
+        return
     try:
-        execute_mesh_command(CONNECTION_ARGS + ["public", "Don't forget to check the traffic this week."])
+        execute_mesh_command(io.CONNECTION_ARGS + ["public", "Don't forget to check the traffic this week."])
+        _emit("out", 0, "Don't forget to check the traffic this week.")
         channel_list = ", ".join(f"#{n}" for n in [*CHANNEL_NAMES.values(), WEATHER_CHANNEL_NAME])
-        execute_mesh_command(CONNECTION_ARGS + ["public", f"Channels in use: {channel_list}"])
+        execute_mesh_command(io.CONNECTION_ARGS + ["public", f"Channels in use: {channel_list}"])
+        _emit("out", 0, f"Channels in use: {channel_list}")
         logging.info(f"Sent weekly public-channel reminder ({channel_list}).")
         last_weekly_ad_sent = wk
     except Exception as e:
         logging.error(f"Weekly public-channel reminder failed: {e}")
 
-def check_incoming_test_messages():
-    """Polls `.sync_msgs` (fetch-and-dequeue all unread messages from the node) and auto-replies
-    to any channel message whose body is exactly "test" (case-insensitive). Per MeshCore's group
-    text message format, the sender's name is embedded in the message text itself as "name: body"
-    (see NODE_LOCATION_NAME/_TEST_SENDER_RE note above) rather than a separate field, so that's
-    parsed out here. path_len of 255 means the message arrived direct (0 hops); any other value is
-    the literal hop count."""
-    try:
-        result = execute_mesh_command(CONNECTION_ARGS + [".sync_msgs"])
-    except Exception as e:
-        logging.error(f"Failed to poll for incoming messages: {e}")
+
+
+# The auto-reply to "test" / "t".  Placeholders in the texts: {sender} {hops} {snr} {channel}.  The GUI addon exposes all four as settings.
+TEST_REPLY_DEFAULT = "@{sender} Test received, {hops} hops"                 # answer given on the test channel
+TEST_REDIRECT_DEFAULT = "@{sender} Please send test messages in {channel}"   # answer given on any other watched channel
+TEST_REPLY_TEXT = TEST_REPLY_DEFAULT
+TEST_REDIRECT_TEXT = TEST_REDIRECT_DEFAULT
+TEST_CHANNEL = ""   # where tests belong, e.g. "#bot-van" ("" = no special channel: every watched channel gets TEST_REPLY_TEXT)
+TEST_WATCH = []     # channels to check for "test" (names like "Public", "#bot-van"); [] = every channel
+
+def _norm_chan(name): return (name or "").strip().lstrip("#").lower()
+
+def _channel_name(idx):
+    if idx == 0: return "Public"
+    for name, i in io.CHANNEL_INDEX_BY_NAME.items():
+        if i == idx: return name
+    return None
+
+def handle_test_message(data):
+    """Auto-replies on the same channel if this channel message is exactly "test" or "t" and the channel is one we check.
+    On the test channel (TEST_CHANNEL) the reply is TEST_REPLY_TEXT; on other checked channels it points people to the test channel."""
+    if data.get("type") != "CHAN": return
+    raw_text = data.get("text", "")
+    sender, body = split_sender(raw_text)
+    if body.lower() not in ("test", "t"): return  # "t" treated as shorthand for "test", per request
+    chan_idx = data.get("channel_idx", DEFAULT_CHANNEL_IDX)
+    here = _norm_chan(_channel_name(chan_idx))
+    watch = {_norm_chan(c) for c in TEST_WATCH if _norm_chan(c)}
+    if watch and TEST_CHANNEL: watch.add(_norm_chan(TEST_CHANNEL))   # the test channel itself is always checked
+    if watch and here not in watch: return                           # not a channel we were asked to check
+    dedup_key = (data.get("channel_idx"), data.get("sender_timestamp"), raw_text)
+    if dedup_key in _recent_test_replies: return
+    _recent_test_replies.add(dedup_key)
+    if len(_recent_test_replies) > 200:  # bounded so this never grows unbounded over a long uptime
+        _recent_test_replies.pop()
+    if not tx_allowed("Test reply"):
+        logging.info(f"Muted: not replying to test message from {sender}")
         return
-    combined = f"{result.stdout}\n{result.stderr}"
-    # TEMPORARY DIAGNOSTIC: log every non-trivial .sync_msgs response verbatim, so a real incoming
-    # message's actual JSON shape is visible in the log instead of having to guess at field names
-    # blind (get_channels already surprised us once — same risk here). Safe to remove once the
-    # auto-reply is confirmed working end-to-end; harmless to leave since it only logs when there's
-    # actually something more than an empty "[]" response.
-    if combined.strip() not in ("", "[]"):
-        logging.info(f"[DIAGNOSTIC] Raw .sync_msgs output: {combined!r}")
-    for line in combined.splitlines():
-        line = line.strip()
-        # BUG FIX: confirmed live (twice now, via the diagnostic logging above) that `.sync_msgs`
-        # prints ALL fetched messages as a single JSON ARRAY on one line (`[{...}, {...}]`), not one
-        # JSON object per line as originally assumed. The old check `line.startswith("{")` rejected
-        # that line outright since it starts with `[`, silently discarding every real message before
-        # it was ever parsed — this is why a confirmed, matching "T" message never got a reply.
-        if not line or line[0] not in "{[": continue
-        try:
-            # raw_decode() only needs the line to START with valid JSON, not end there — meshcli
-            # prints trailing text (e.g. a disconnect log line) after the payload on the same
-            # logical line, which a strict full-string json.loads() would reject as "Extra data".
-            parsed, _ = json.JSONDecoder().raw_decode(line)
-        except ValueError:
-            continue
-        messages = parsed if isinstance(parsed, list) else [parsed]
-        for data in messages:
-            if not isinstance(data, dict) or data.get("type") != "CHAN": continue  # only channel messages get a same-channel reply; skip direct/private messages
+    on_test_channel = not TEST_CHANNEL or here == _norm_chan(TEST_CHANNEL)
+    shown = TEST_CHANNEL if TEST_CHANNEL.strip().startswith("#") or _norm_chan(TEST_CHANNEL) == "public" else "#" + TEST_CHANNEL.strip()
+    path_len = data.get("path_len")
+    try: reply = (TEST_REPLY_TEXT if on_test_channel else TEST_REDIRECT_TEXT).format(
+        sender=sender, hops=0 if path_len == 255 else (path_len or 0), snr=data.get("SNR", "?"), channel=shown)
+    except (KeyError, IndexError, ValueError): reply = f"@{sender} Test received"
+    try:
+        execute_mesh_command(io.CONNECTION_ARGS + ["chan", str(chan_idx), reply])
+        _emit("out", chan_idx, reply)
+        logging.info(f"Replied to test message from {sender} on channel {chan_idx}: {reply}")
+    except Exception as e:
+        logging.error(f"Failed to send test-reply on channel {chan_idx}: {e}")
 
-            raw_text = data.get("text", "")
-            m = _TEST_SENDER_RE.match(raw_text)
-            sender, body = (m.group(1).strip(), m.group(2).strip()) if m else ("someone", raw_text.strip())
-            if body.lower() not in ("test", "t"): continue  # "t" treated as shorthand for "test", per request
-
-            dedup_key = (data.get("channel_idx"), data.get("sender_timestamp"), raw_text)
-            if dedup_key in _recent_test_replies: continue
-            _recent_test_replies.add(dedup_key)
-            if len(_recent_test_replies) > 200:  # bounded so this never grows unbounded over a long uptime
-                _recent_test_replies.pop()
-
-            path_len = data.get("path_len")
-            hops = 0 if path_len == 255 else (path_len or 0)
-            chan_idx = data.get("channel_idx", DEFAULT_CHANNEL_IDX)
-            reply = f"@{sender} Test should be made in #kod-bot"
-            try:
-                execute_mesh_command(CONNECTION_ARGS + ["chan", str(chan_idx), reply])
-                logging.info(f"Replied to test message from {sender} on channel {chan_idx}: {reply}")
-            except Exception as e:
-                logging.error(f"Failed to send test-reply on channel {chan_idx}: {e}")
+def check_incoming_test_messages():
+    for data in fetch_incoming_messages(): handle_test_message(data)
 
 BROADCAST_PACING_SECONDS = 1.5  # gap between consecutive over-the-air transmissions
 
@@ -1052,6 +951,9 @@ async def scrape_traffic_feeds():
                         # city/road lead-in above was already stripped. Stripped unconditionally, not
                         # just when a city was found.
                         d_txt = re.sub(r'\s*Last update:.*$', '', d_txt, flags=re.IGNORECASE).strip()
+                        geo = ev.get("geography") or {}
+                        if geo.get("type") == "Point" and len(geo.get("coordinates") or []) >= 2:
+                            ALERT_LOCATIONS[f"DriveBC|{g_txt}"] = (geo["coordinates"][1], geo["coordinates"][0], t_txt)
                         cur[g_txt] = ("DriveBC", t_txt, d_txt)
             else:
                 skip_clear_sources.add("DriveBC")
@@ -1280,19 +1182,22 @@ async def scrape_weather_warnings():
 
     await process_scraped_alerts(cur, active_weather_alerts)
 
+
+
+
 async def main():
-    global USE_SCOPES, REGION_SCOPES, CONNECTION_ARGS, TRANSLINK_API_KEY
+    global USE_SCOPES, REGION_SCOPES, TRANSLINK_API_KEY
     print("\n=======================================================\n           BC EMERGENCY TRANSPORTATION AGENT           \n=======================================================\n")
 
     mode = ""
     while mode not in ("usb", "bluetooth"):
-        raw = input("\nConnect to the Heltec V3 via USB or Bluetooth? (usb/bluetooth): ").strip().lower()
+        raw = input("\nConnect to the MeshCore node via USB or Bluetooth? (usb/bluetooth): ").strip().lower()
         if raw in ("u", "usb"): mode = "usb"
         elif raw in ("b", "bt", "ble", "bluetooth"): mode = "bluetooth"
         else: print("Please type 'usb' or 'bluetooth'.")
 
-    CONNECTION_ARGS = auto_detect_usb_port() if mode == "usb" else auto_detect_ble_device()
-    if not CONNECTION_ARGS: return
+    io.CONNECTION_ARGS = auto_detect_usb_port() if mode == "usb" else auto_detect_ble_device()
+    if not io.CONNECTION_ARGS: return
 
     resolve_channel_indices()  # look up #drivebc/#bcferries/#bctransit/#translink/#weather indices before anything tries to broadcast
 
@@ -1324,14 +1229,9 @@ async def main():
         for reg in REGION_SCOPES.keys(): REGION_SCOPES[reg] = input(f"Scope for {reg}: ").strip()
     u_in = input("\nEnter target frequency in MHz (e.g., 910.425) or press ENTER to skip: ").strip()
     if u_in:
-        try:
-            execute_mesh_command(CONNECTION_ARGS + ["set", "freq", u_in])
-            execute_mesh_command(CONNECTION_ARGS + ["reboot"])
-            logging.info(f"Radio frequency set to {u_in} MHz. Rebooting node, waiting 5s to stabilize...")
-            await asyncio.sleep(5)
-        except Exception as e:
-            logging.error(f"Failed to set radio frequency to {u_in} MHz: {e}")
-    logging.info(f"Monitoring feeds via {mode.upper()} ({' '.join(CONNECTION_ARGS)}).")
+        ok, detail = set_radio_frequency(u_in)
+        (logging.info if ok else logging.error)(detail)
+    logging.info(f"Monitoring feeds via {mode.upper()} ({' '.join(io.CONNECTION_ARGS)}).")
     await asyncio.gather(traffic_loop(), weather_loop(), messages_loop())
 
 async def traffic_loop():
@@ -1340,7 +1240,7 @@ async def traffic_loop():
         # reconfigured mid-run and lost its channel list), keep retrying once a minute instead of
         # requiring a manual restart to notice — see resolve_channel_indices docstring for the
         # incident (5+ days of alerts silently going to Public) this is fixing.
-        if not CHANNEL_INDEX_BY_NAME:
+        if not io.CHANNEL_INDEX_BY_NAME:
             resolve_channel_indices()
         await check_tsunami_warnings()  # checked every minute, not on the slower 10-min weather cycle — a tsunami warning is too time-critical to wait on
         await check_earthquake_warnings()  # same cadence/urgency as tsunami — see broadcast_critical_all_channels
@@ -1361,4 +1261,5 @@ async def messages_loop():
         check_incoming_test_messages()
         await asyncio.sleep(MESSAGE_POLL_SECONDS)
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

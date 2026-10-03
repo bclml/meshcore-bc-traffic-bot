@@ -1,0 +1,39 @@
+name: Idea / suggestion
+description: Suggest a feature, an improvement or an addon you'd like to see
+title: "[Idea] "
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea! Rough ideas are welcome - say what you'd like to do and why, and others can add to it.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What's your idea?
+      description: What should the GUI, the bot or an addon be able to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help?
+      description: What problem does it solve, or who would use it?
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Where would it fit?
+      options:
+        - Core GUI (chat, map, nodes, settings)
+        - New addon
+        - Existing addon (e.g. BC traffic bot)
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you help?
+      options:
+        - label: I'd be happy to help build or test this

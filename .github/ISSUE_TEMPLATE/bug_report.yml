@@ -1,0 +1,35 @@
+name: Bug report
+description: Something isn't working
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Help > About in the GUI shows it.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log lines
+      description: From the Status window or logs/Status.txt. Remove anything private (API keys, node keys) first.
+      render: text
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How is your node connected?
+      options: [USB, Bluetooth, Demo mode (no radio), Not applicable]
+  - type: input
+    id: addons
+    attributes:
+      label: Addons installed
+      description: From Tools > Addons.

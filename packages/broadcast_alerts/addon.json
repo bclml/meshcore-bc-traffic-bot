@@ -1,0 +1,15 @@
+{
+  "name": "broadcast_alerts",
+  "title": "BC traffic bot",
+  "version": "1.1.0",
+  "description": "DriveBC, BC Ferries, BC Transit, TransLink, weather, earthquake and tsunami alerts broadcast to the mesh, with a master mute and per-alert switches.",
+  "requires": [
+    "requests",
+    "gtfs-realtime-bindings",
+    "pyserial"
+  ],
+  "files": {
+    "broadcast_alerts.py": "addons/broadcast_alerts.py",
+    "../../emergency_agent.py": "emergency_agent.py"
+  }
+}
